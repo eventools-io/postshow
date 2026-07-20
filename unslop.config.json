@@ -1,0 +1,8 @@
+{
+  "failOn": "high+bugs",
+  "rules": {
+    "ai-purple": "medium",
+    "bolded-lead-in": "medium",
+    "claude-default-look": "medium"
+  }
+}

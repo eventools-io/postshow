@@ -1,0 +1,11 @@
+{
+  "extends": "@eventools/config/typescript",
+  "compilerOptions": {
+    "outDir": "./out",
+    "types": ["node", "vitest/globals"],
+    "module": "esnext",
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*", "electron.vite.config.ts"],
+  "exclude": ["node_modules", "out", "dist"]
+}

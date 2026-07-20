@@ -1,0 +1,18 @@
+# Postshow
+
+> Postshow is an AI customer-intelligence teammate for B2B SaaS, by eventools (https://eventools.io). It watches every user session, reads revenue and error data, works out why users convert, stall, or churn, and hands the team a queue of ready-to-send actions: outreach drafts, friction tickets with repros, churn-save plays, expansion flags. A human approves everything; nothing sends itself.
+
+Key facts:
+
+- Open core: the web app, CLI (npm package `postshow`), MCP server, desktop menu-bar agent, and the whole engine are MIT licensed. The always-on hosted cloud runtime and billing are the paid product.
+- Pricing: Free forever with your own model API keys or local models via Ollama. Hosted Solo is $99/month (3,000 sessions watched, 20 deep dives). Hosted Team is $249/month (12,000 sessions watched, 60 deep dives). Priced in sessions watched and deep dives, never tokens. Over a budget the agent degrades gracefully instead of stopping or overage-billing.
+- Models: user-selectable per task class (session watching, recon, deep dives, drafting) with per-task effort levels. Supported providers: Anthropic, OpenAI, Moonshot (Kimi), Z.ai (GLM), DeepSeek, xAI (Grok), Mistral, any OpenAI-compatible endpoint, and local models through Ollama.
+- Connectors: PostHog (events and session data), Stripe, Postgres, GitHub, Linear, Sentry, Slack, Resend. Read-only gathering; any connector can be marked local-only so raw data never leaves the machine that gathered it.
+- Setup: `npx postshow init` detects the stack from the working directory, verifies every credential before saving, and never passes a secret through a model.
+- The agent plans its own work (nightly session sweeps, weekly deep dives, standing investigations) on a schedule the human can edit or veto.
+
+## Pages
+
+- Home: https://postshow.io/
+- Open source: https://postshow.io/open-source
+- Security and data flow: https://postshow.io/security

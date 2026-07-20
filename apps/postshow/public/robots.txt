@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /inbox
+Disallow: /accounts
+Disallow: /field-notes
+Disallow: /work-plan
+Disallow: /connections
+Disallow: /settings
+Disallow: /signin
+
+Sitemap: https://postshow.io/sitemap.xml

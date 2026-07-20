@@ -1,0 +1,30 @@
+{
+  "name": "@eventools/postshow-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Postshow desktop: the menu-bar agent. Wraps the postshow web app in an Electron shell with a background scheduler that runs local jobs (BYOK or Ollama) with catch-up on wake.",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "tsup && POSTSHOW_WEB_URL=http://localhost:5173 electron .",
+    "build": "tsup",
+    "dist": "tsup && electron-builder --mac",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf out dist .turbo node_modules"
+  },
+  "dependencies": {
+    "@eventools/postshow-core": "workspace:*",
+    "postshow": "workspace:*"
+  },
+  "devDependencies": {
+    "@eventools/config": "workspace:*",
+    "@types/node": "^22.10.2",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.0.12",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  }
+}

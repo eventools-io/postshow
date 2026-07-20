@@ -1,0 +1,31 @@
+{
+  "name": "@eventools/postshow-core",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Postshow shared core: model catalog, multi-provider engine, task classes, plans, and agent prompts. Consumed by the web app, Deno edge functions (via generated mirror), the postshow CLI/MCP, and the desktop app. Must stay Node-builtin-free and workspace-dependency-free so Deno can import it.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src",
+    "LICENSE"
+  ],
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eventools/config": "workspace:*",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  }
+}

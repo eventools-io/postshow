@@ -1,0 +1,20 @@
+appId: io.postshow.desktop
+productName: Postshow
+directories:
+  output: dist
+files:
+  - out/**
+mac:
+  category: public.app-category.business
+  target:
+    - target: dmg
+      arch: universal
+    - target: zip
+      arch: universal
+  hardenedRuntime: true
+  # Notarization needs Apple credentials in the environment
+  # (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER); packaging without
+  # them produces an unsigned local build.
+  notarize: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist

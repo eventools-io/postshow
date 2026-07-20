@@ -1,0 +1,248 @@
+/* Postshow design system, rebuilt from scratch.
+   Shell: warm light, airy, pill geometry (Openship). Accents: tungsten-amber
+   highlighter swipes and a framed dark demo window (PostHog). The app
+   interior keeps the night palette: the site is daytime, the product is the
+   night shift. */
+
+@font-face {
+  font-family: 'Inter Variable'; /* unslop-ignore: brand body face */
+  font-style: normal;
+  font-display: optional;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')
+    format('woff2-variations');
+}
+@font-face {
+  font-family: 'Inter Variable'; /* unslop-ignore: italic face of the brand font, used for the two-line headline */
+  font-style: italic;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('@fontsource-variable/inter/files/inter-latin-wght-italic.woff2')
+    format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: optional;
+  font-weight: 100 800;
+  src: url('@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2')
+    format('woff2-variations');
+}
+@font-face {
+  font-family: 'Inter Fallback'; /* unslop-ignore: metric fallback for the brand face */
+  src:
+    local('Arial'), local('Helvetica Neue'), local('Helvetica'), local('Liberation Sans'),
+    local('DejaVu Sans'), local('FreeSans');
+  size-adjust: 107.4%;
+  ascent-override: 90%;
+  descent-override: 22.5%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'JetBrains Mono Fallback';
+  src:
+    local('Menlo'), local('Monaco'), local('Consolas'), local('Liberation Mono'),
+    local('DejaVu Sans Mono'), local('Courier New');
+  size-adjust: 102%;
+  ascent-override: 85%;
+  descent-override: 20%;
+  line-gap-override: 0%;
+}
+
+:root {
+  --font-public-sans:
+    'Inter Variable', 'Inter Fallback', 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --font-public-mono:
+    'JetBrains Mono Variable', 'JetBrains Mono Fallback', 'JetBrains Mono', ui-monospace, 'SF Mono',
+    Menlo, monospace;
+
+  /* Shell (light, warm) */
+  --shell-0: #f7f6f2;
+  --shell-1: #ffffff;
+  --shell-2: #ebe9e2;
+  --shell-3: #dcdad0;
+  --shell-fg: #14170f;
+  --shell-fg-2: #565a4e;
+  --shell-fg-3: #878b7d;
+
+  /* Night (the product: demo window and app interior). Warm charcoal, lit
+     by the signal lamp. */
+  --night-0: #131009;
+  --night-1: #19150e;
+  --night-2: #211c13;
+  --night-3: #2f2a1e;
+  --night-4: #463f2d;
+  --night-fg: #f5f2ea;
+  --night-fg-2: #aca594;
+  --night-fg-3: #847e6e;
+
+  /* Signal: tungsten amber, the ghost light left burning on stage all night
+     while Postshow works. */
+  --signal: #ffb224; /* unslop-ignore: chosen brand accent */
+  --signal-hover: #ffc24d;
+  --signal-ink: #1a1206;
+  --signal-deep: #9a6700;
+  --signal-wash: rgba(255, 178, 36, 0.26);
+
+  --warn: #e0b23f;
+  --bad: #d4553f;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-pill: 999px;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  /* App-interior primitives (night scope). */
+  .ps-input {
+    @apply h-10 w-full rounded-md border border-night-4 bg-night-2 px-3 font-public-sans text-[14px] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none;
+  }
+  .ps-label {
+    @apply font-public-mono text-[11px] font-medium uppercase tracking-[0.14em] text-night-fg-3;
+  }
+  .ps-btn-primary {
+    @apply inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-pill bg-signal px-4 font-public-sans text-[13px] font-medium text-signal-ink transition-colors duration-[120ms] hover:bg-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ps-btn-ghost {
+    @apply inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-pill border border-night-4 px-4 font-public-sans text-[13px] text-night-fg-2 transition-colors duration-[120ms] hover:bg-night-2 hover:text-night-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .ps-card {
+    @apply rounded-lg border border-night-3 bg-night-1;
+  }
+
+  /* Marketing primitives (light shell). */
+  .mk-btn-dark {
+    @apply inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-pill bg-shell-fg px-6 font-public-sans text-[14px] font-medium text-shell-1 transition-transform duration-[120ms] hover:scale-[1.02] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-fg;
+  }
+  .mk-btn-light {
+    @apply inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-pill border border-shell-3 bg-shell-1 px-6 font-public-sans text-[14px] font-medium text-shell-fg transition-colors duration-[120ms] hover:border-shell-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-shell-fg;
+  }
+  .mk-btn-signal {
+    @apply inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-pill bg-signal px-6 font-public-sans text-[14px] font-medium text-signal-ink transition-colors duration-[120ms] hover:bg-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal;
+  }
+  .mk-eyebrow {
+    @apply font-public-mono text-[11px] font-medium uppercase tracking-[0.22em];
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--shell-0);
+  color: var(--shell-fg);
+  font-family: var(--font-public-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--signal);
+  color: var(--signal-ink);
+}
+
+/* Highlighter swipe behind a word, slightly rotated like a marker pass. */
+.highlight-swipe {
+  position: relative;
+  white-space: nowrap;
+}
+.highlight-swipe::before {
+  content: '';
+  position: absolute;
+  inset: 0.3em -0.14em 0.02em -0.14em;
+  background: var(--signal-wash);
+  border-radius: 3px;
+  transform: rotate(-1.4deg);
+  z-index: -1;
+}
+
+/* Soft aurora wash under the hero. */
+.aurora {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 420px;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 60% at 30% 80%, rgba(255, 178, 36, 0.12), transparent 70%),
+    radial-gradient(38% 55% at 70% 85%, rgba(224, 178, 63, 0.1), transparent 70%);
+  filter: blur(2px);
+}
+
+/* Pulsing status dot. */
+.chip-pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px; /* unslop-ignore: 6px status dot, a circle by necessity */
+  background: var(--signal);
+  animation: chip-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes chip-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: reveal-up 640ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+.reveal-1 {
+  animation-delay: 60ms;
+}
+.reveal-2 {
+  animation-delay: 160ms;
+}
+.reveal-3 {
+  animation-delay: 260ms;
+}
+.reveal-4 {
+  animation-delay: 380ms;
+}
+
+@keyframes reveal-up {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* The night log tape: lines land one at a time, like a log being written. */
+.night-log-line {
+  opacity: 0;
+  animation: reveal-up 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .chip-pulse-dot {
+    animation: none;
+  }
+  .night-log-line {
+    animation: none;
+    opacity: 1;
+  }
+  .reveal,
+  .reveal-1,
+  .reveal-2,
+  .reveal-3,
+  .reveal-4 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

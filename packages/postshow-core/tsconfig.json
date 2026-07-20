@@ -1,0 +1,9 @@
+{
+  "extends": "@eventools/config/typescript",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "types": ["vitest/globals"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

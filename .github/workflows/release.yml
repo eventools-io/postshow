@@ -1,0 +1,50 @@
+name: Release
+
+# Tag a release (v0.2.0) to publish the CLI to npm and attach desktop builds.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  npm:
+    name: Publish CLI to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter postshow build
+      - name: Publish
+        if: env.NODE_AUTH_TOKEN != ''
+        working-directory: packages/postshow-cli
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  desktop:
+    name: Desktop (mac universal)
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build and package
+        run: pnpm --filter @eventools/postshow-desktop dist
+      - name: Attach artifacts to the release
+        run: gh release upload "${GITHUB_REF_NAME}" apps/postshow-desktop/dist/*.dmg apps/postshow-desktop/dist/*.zip --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}

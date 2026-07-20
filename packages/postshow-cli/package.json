@@ -1,0 +1,43 @@
+{
+  "name": "postshow",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "The Postshow CLI: setup wizard, local agent runtime, inbox review, and MCP server for the customer-intelligence teammate at postshow.io.",
+  "type": "module",
+  "bin": {
+    "postshow": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@eventools/postshow-core": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@eventools/config": "workspace:*",
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.6"
+  },
+  "exports": {
+    "./lib": {
+      "types": "./src/lib.ts",
+      "import": "./dist/lib.js"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eventools-io/postshow.git"
+  },
+  "homepage": "https://postshow.io"
+}

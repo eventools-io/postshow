@@ -1,0 +1,30 @@
+# Build outputs
+dist
+build
+.turbo
+.next
+.cache
+
+# Dependencies
+node_modules
+pnpm-lock.yaml
+package-lock.json
+
+# Coverage
+coverage
+
+# Environment
+.env
+.env.local
+.env.production
+
+# GitHub Actions workflows (YAML parser incompatible with ${{ }} expressions)
+.github
+
+# Misc
+*.log
+.DS_Store
+
+# Generated mirror of @eventools/show-domain for Deno edge functions
+# (source of truth: packages/show-domain/src; regenerated via pnpm gen:show-domain)
+supabase/functions/_shared/_show-domain

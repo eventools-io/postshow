@@ -1,0 +1,14 @@
+[build]
+  command = "pnpm build:postshow"
+  publish = "/apps/postshow/dist"
+  ignore = "node ./scripts/netlify/should-build.mjs postshow"
+
+[build.environment]
+  NODE_VERSION = "24"
+  PNPM_VERSION = "10.20.0"
+
+# Single-page app: the router owns every path (landing, /signin, /inbox, ...).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
