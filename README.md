@@ -15,9 +15,9 @@ MIT licensed (see LICENSE in each package):
 - `packages/postshow-cli` - the `postshow` CLI, setup wizard, local runtime, and MCP server
 - `packages/postshow-core` - the shared engine: model catalog, multi-provider calls, task classes, prompts, connector adapters
 
-Proprietary (this monorepo's `supabase/` tree): the hosted cloud runtime, scheduler, billing, and gateway. The free product is fully usable without them through BYOK keys or local models.
+Proprietary (separate private repo): the hosted cloud runtime, scheduler, billing, and gateway. The free product is fully usable without them through BYOK keys or local models.
 
-These packages are staged for extraction to a public `eventools-io/postshow` repository; workspace boundaries and licenses are already drawn along that line.
+The hosted cloud runtime (Supabase migrations and edge functions, billing, scheduler) lives in a separate private repository and vendors this repo's engine core at a pinned ref.
 
 ## Plans
 
@@ -32,9 +32,8 @@ The honest version: you can, and for most teams the hosted tier is less work tha
 ## Develop
 
 ```sh
-pnpm dev:postshow          # web app on :5173
-pnpm --filter @eventools/postshow test
-pnpm --filter postshow build     # the CLI
+pnpm install
+pnpm --filter @eventools/postshow dev    # web app on :5173
+pnpm test                                # every package
+pnpm build                               # web (with prerendered heads), cli, desktop
 ```
-
-The agent runtime lives in `supabase/functions/postshow-*` with shared logic generated from `packages/postshow-core` (`pnpm gen:postshow-core`).

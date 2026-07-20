@@ -3,21 +3,16 @@
 Thanks for wanting to make Postshow better. Issues, bug reports, and pull
 requests are all welcome here.
 
-## How this repo works right now
+## How contributions work
 
-This repository is currently a generated export of the Postshow surfaces
-from the eventools monorepo, where the hosted cloud runtime also lives.
-Until development moves here at launch, that means one honest wrinkle:
+This is the real development repository. Open your PR here; CI runs here,
+review happens here, and approved PRs merge here, with your commits and
+authorship in the history like any other project.
 
-- Open your PR here. CI runs here, review happens here, in the open.
-- When a maintainer approves it, we apply the change upstream (preserving
-  your authorship with a Co-authored-by trailer), run it through the full
-  pipeline including the cloud runtime the public CI cannot see, and ship it.
-- Your PR is closed with a link to the sync commit that carries your change,
-  and the release notes credit you.
-- If a sync lands while your PR is open, rebase on main and CI re-runs.
-
-At launch, development moves to this repository and PRs merge directly.
+The hosted cloud runtime lives in a separate private repository that vendors
+this repo's engine core at a pinned ref, so a change to
+packages/postshow-core ships to the hosted product when we bump that pin.
+Nothing about your contribution flow depends on it.
 
 ## Ground rules
 
