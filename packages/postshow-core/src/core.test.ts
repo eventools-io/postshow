@@ -338,6 +338,35 @@ describe('prompts and sanitize', () => {
     expect(clean.proposedRule).toBe('Keep drafts under 120 words.');
     expect(clean.scratchpadUpdates).toEqual([{ key: 'noise-checkout-beta', content: 'known' }]);
   });
+
+  it('survives wrong types in every field: the model is untrusted', () => {
+    // Reproduces a live deep-dive failure: meta arrived as an object and
+    // `.slice` blew up the run. Nothing the model sends may throw here.
+    const clean = sanitizeModelOutput({
+      summary: 42,
+      field_notes: [
+        { title: 7, detail: { nested: true }, sessions: 'many', severity: 3, fingerprint: 9 },
+        'not even an object',
+        null,
+      ],
+      inbox_items: [
+        { title: 'ok', meta: { account: 'Acme' }, body: ['a'], evidence: 1, kind: {} },
+      ],
+      account_updates: [{ name: 123, facts: 'not-an-array', next_move: {} }],
+      proposed_job: { label: { text: 'x' }, interval_minutes: 60 },
+      proposed_rule: ['not', 'a', 'string'],
+      scratchpad_updates: { key: 'pattern-x', content: 'not an array' },
+    } as never);
+    expect(clean.summary).toBe('42');
+    expect(clean.fieldNotes).toEqual([
+      { title: '7', detail: '', sessions: 0, severity: 'medium', fingerprint: '9' },
+    ]);
+    expect(clean.inboxItems[0]).toMatchObject({ meta: '', body: '', evidence: '1', kind: 'other' });
+    expect(clean.accountUpdates[0]).toMatchObject({ name: '123', facts: [], next_move: '' });
+    expect(clean.proposedJob).toBeNull();
+    expect(clean.proposedRule).toBeNull();
+    expect(clean.scratchpadUpdates).toEqual([]);
+  });
 });
 
 describe('schedule', () => {
@@ -380,5 +409,18 @@ describe('json parsing', () => {
     expect(parseModelJson<{ a: number }>('```json\n{"a": 1}\n```').a).toBe(1);
     expect(parseModelJson<{ a: number }>('noise {"a": 2} trailing').a).toBe(2);
     expect(() => parseModelJson('no json here')).toThrow('no JSON object');
+  });
+
+  it('repairs the near-JSON small local models emit', () => {
+    // Trailing commas before } and ].
+    expect(parseModelJson<{ a: number[] }>('{"a": [1, 2,], }').a).toEqual([1, 2]);
+    // Raw newlines inside a string literal.
+    expect(parseModelJson<{ s: string }>('{"s": "line one\nline two"}').s).toBe(
+      'line one\nline two'
+    );
+    // Commas and braces inside strings stay untouched.
+    expect(parseModelJson<{ s: string }>('{"s": "a, }", "n": 1,}').s).toBe('a, }');
+    // Unrepairable input names the parse failure and shows a snippet.
+    expect(() => parseModelJson('{"a": unquoted}')).toThrow('model returned invalid JSON');
   });
 });
