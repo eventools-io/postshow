@@ -1,0 +1,34 @@
+name: Dependency Audit Backstop
+
+# Daily sweep so a critical advisory published against an unchanged dependency
+# surfaces without waiting for a PR to trigger the CI audit job.
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-audit-backstop
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Audit main
+    runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
