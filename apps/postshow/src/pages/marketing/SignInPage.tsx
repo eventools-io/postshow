@@ -40,7 +40,14 @@ export function SignInPage() {
         track('signin');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      // Gateway-level failures surface as errors whose message is empty or
+      // raw JSON; show something a person can act on instead.
+      const message = e instanceof Error ? e.message.trim() : '';
+      setError(
+        message && !message.startsWith('{')
+          ? message
+          : 'Could not reach the sign-in service. Try again in a moment.'
+      );
     } finally {
       setBusy(false);
     }

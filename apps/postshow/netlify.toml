@@ -1,7 +1,6 @@
 [build]
   command = "pnpm build:postshow"
-  publish = "/apps/postshow/dist"
-  ignore = "node ./scripts/netlify/should-build.mjs postshow"
+  publish = "apps/postshow/dist"
 
 [build.environment]
   NODE_VERSION = "24"
