@@ -85,8 +85,8 @@ jobs:
         with:
           fetch-depth: 0
       - name: Gate added lines for AI-slop tells
-        # Pinned to the commit behind v0.1.0; diff-aware, added lines only.
-        uses: cj-vana/unslop-ci@b6b8d62d968a677666318a92257d07f6bdf6a56f
+        # Pinned to the commit behind v0.2.0; diff-aware, added lines only.
+        uses: cj-vana/unslop-ci@7e31097c8525f273b622a48eaae4a0b80a11c515
 
   pr-title:
     name: Conventional PR Title
