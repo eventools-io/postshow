@@ -1,5 +1,5 @@
 import { PAGE_META, usePageMeta } from '@/lib/seo';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { useWorkspace } from '@/state/WorkspaceContext';
@@ -12,11 +12,6 @@ import {
   POSTSHOW_LEGAL_EFFECTIVE_DATE,
   signupLegalAcceptanceMetadata,
 } from '@/lib/legalAcceptance';
-import {
-  TurnstileChallenge,
-  type TurnstileAction,
-  type TurnstileChallengeHandle,
-} from '@/components/TurnstileChallenge';
 
 type Mode = 'signin' | 'signup' | 'forgot' | 'update';
 
@@ -45,11 +40,11 @@ function publicAuthError(value: unknown, mode: Mode): string {
   if (weak && (mode === 'signup' || mode === 'update')) return weak;
   switch (mode) {
     case 'signin':
-      return 'Sign-in failed. Check your credentials and complete security verification again.';
+      return 'Sign-in failed. Check your email and password, then try again.';
     case 'signup':
-      return 'Your account could not be created. Check the form and complete security verification again.';
+      return 'Your account could not be created. Check the form and try again.';
     case 'forgot':
-      return 'Password recovery could not be requested. Complete security verification again and retry.';
+      return 'Password recovery could not be requested. Check the email and try again.';
     case 'update':
       return 'Your password could not be updated. Request a new reset link and try again.';
   }
@@ -69,14 +64,6 @@ export function SignInPage() {
   const [notice, setNotice] = useState('');
   const [signupEnabled, setSignupEnabled] = useState<boolean | null>(null);
   const [legalAccepted, setLegalAccepted] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
-  const [captchaBypassed, setCaptchaBypassed] = useState(false);
-  const turnstile = useRef<TurnstileChallengeHandle>(null);
-
-  const handleCaptchaChange = useCallback((token: string | null, bypassed: boolean) => {
-    setCaptchaToken(token);
-    setCaptchaBypassed(bypassed);
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,9 +100,6 @@ export function SignInPage() {
     setPassword('');
     setPasswordConfirmation('');
     setLegalAccepted(false);
-    setCaptchaToken(null);
-    setCaptchaBypassed(false);
-    turnstile.current?.reset();
     const params = new URLSearchParams(searchParams);
     if (next === 'signin') params.delete('mode');
     else params.set('mode', next);
@@ -125,11 +109,6 @@ export function SignInPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    const needsCaptcha = mode !== 'update';
-    if (needsCaptcha && !captchaToken && !captchaBypassed) {
-      setError('Complete security verification before continuing.');
-      return;
-    }
     setBusy(true);
     setError('');
     setNotice('');
@@ -143,8 +122,9 @@ export function SignInPage() {
           password,
           options: {
             data: signupLegalAcceptanceMetadata(),
-            ...(captchaBypassed ? {} : { captchaToken: captchaToken! }),
-            ...(invite ? { emailRedirectTo: `${window.location.origin}/invite` } : {}),
+            emailRedirectTo: invite
+              ? `${window.location.origin}/invite`
+              : `${window.location.origin}/signin`,
           },
         });
         if (signUpError) throw signUpError;
@@ -159,7 +139,6 @@ export function SignInPage() {
       } else if (mode === 'forgot') {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/signin?mode=update`,
-          ...(captchaBypassed ? {} : { captchaToken: captchaToken! }),
         });
         if (resetError) throw resetError;
         setNotice(
@@ -182,7 +161,6 @@ export function SignInPage() {
         const { error: signInError } = await supabase.auth.signInWithPassword({
           email,
           password,
-          options: captchaBypassed ? {} : { captchaToken: captchaToken! },
         });
         if (signInError) throw signInError;
         track('signin');
@@ -190,10 +168,6 @@ export function SignInPage() {
     } catch (value) {
       setError(publicAuthError(value, mode));
     } finally {
-      if (mode !== 'update') {
-        setCaptchaToken(null);
-        turnstile.current?.reset();
-      }
       setBusy(false);
     }
   }
@@ -299,21 +273,6 @@ export function SignInPage() {
                 />
               </label>
             ) : null}
-            {mode !== 'update' ? (
-              <TurnstileChallenge
-                ref={turnstile}
-                action={
-                  (
-                    {
-                      signin: 'sign_in',
-                      signup: 'sign_up',
-                      forgot: 'password_recovery',
-                    } as const satisfies Record<Exclude<Mode, 'update'>, TurnstileAction>
-                  )[mode]
-                }
-                onChange={handleCaptchaChange}
-              />
-            ) : null}
             {error ? (
               <p className="m-0 font-public-sans text-[13px] text-bad" role="alert">
                 {error}
@@ -333,8 +292,7 @@ export function SignInPage() {
               disabled={
                 busy ||
                 (mode === 'update' && sessionLoading) ||
-                (mode === 'signup' && !legalAccepted) ||
-                (mode !== 'update' && !captchaToken && !captchaBypassed)
+                (mode === 'signup' && !legalAccepted)
               }
               className="mk-btn-dark mt-1 w-full"
             >

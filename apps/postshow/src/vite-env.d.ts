@@ -11,8 +11,6 @@ interface ImportMetaEnv {
   readonly VITE_POSTSHOW_WORKSPACE_DELETION_FUNCTION?: string;
   readonly VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION?: string;
   readonly VITE_POSTSHOW_WAITLIST_FUNCTION?: string;
-  readonly VITE_POSTSHOW_TURNSTILE_SITE_KEY?: string;
-  readonly VITE_POSTSHOW_TURNSTILE_BYPASS?: string;
 }
 
 interface ImportMeta {

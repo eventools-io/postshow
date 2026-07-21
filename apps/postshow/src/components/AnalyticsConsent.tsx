@@ -65,8 +65,10 @@ export function AnalyticsConsent() {
             id="analytics-consent-detail"
             className="m-0 mt-1 max-w-[62ch] font-public-sans text-[12px] leading-[1.55] text-night-fg-2"
           >
-            Help Eventools LLC improve Postshow with a small set of manual product events. We do not
-            use autocapture or session replay. Authentication and billing work either way. Read our{' '}
+            Help Eventools LLC improve Postshow with product analytics, interaction capture,
+            performance signals, and masked session replay. Replay masks page text and every form
+            field; console logs, request bodies, and request headers are not recorded.
+            Authentication and billing work either way. Read our{' '}
             <a href={POSTSHOW_LEGAL.cookies} className="text-signal hover:text-night-fg">
               Cookies notice
             </a>{' '}

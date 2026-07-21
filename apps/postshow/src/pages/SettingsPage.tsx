@@ -930,9 +930,10 @@ function WorkspaceSettingsPage() {
       <Section title="Privacy, legal, and support">
         <div className="ps-card flex flex-col gap-3 p-4 sm:p-5">
           <p className="m-0 max-w-[68ch] font-public-sans text-[12px] leading-[1.55] text-night-fg-2">
-            Optional analytics records only deliberate product events after consent. Postshow does
-            not enable autocapture or session replay. Review or change that choice at any time, or
-            contact Eventools LLC for account, privacy, security, or billing help.
+            Optional analytics can record product events, interactions, performance, errors,
+            heatmaps, and masked session replay after consent. Page text and form fields are masked,
+            and console logs and network payloads are excluded. Review or change that choice at any
+            time, or contact Eventools LLC for account, privacy, security, or billing help.
           </p>
           <LegalLinks theme="dark" />
         </div>

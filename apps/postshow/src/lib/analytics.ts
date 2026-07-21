@@ -4,6 +4,7 @@ export const ANALYTICS_CONSENT_STORAGE_KEY = 'postshow.analytics-consent.v1';
 export const OPEN_ANALYTICS_PREFERENCES_EVENT = 'postshow:open-analytics-preferences';
 
 type PostHogClient = (typeof import('posthog-js'))['default'];
+type CaptureResult = import('posthog-js').CaptureResult;
 
 let client: PostHogClient | null = null;
 let clientPromise: Promise<PostHogClient | null> | null = null;
@@ -46,31 +47,71 @@ function loadClient(): Promise<PostHogClient | null> {
   return clientPromise;
 }
 
+function stripUrlDetails(value: unknown): unknown {
+  if (typeof value !== 'string' || !value) return value;
+  try {
+    const url = new URL(value, window.location.origin);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return value.split(/[?#]/, 1)[0];
+  }
+}
+
+function sanitizeCapture(result: CaptureResult | null): CaptureResult | null {
+  if (!result) return null;
+  const properties = result.properties;
+  for (const key of ['$current_url', '$referrer', '$referring_url']) {
+    if (key in properties) properties[key] = stripUrlDetails(properties[key]);
+  }
+  return result;
+}
+
 function initializeClient(posthog: PostHogClient): void {
   if (initialized) return;
   const key = analyticsKey();
   if (!key) return;
   posthog.init(key, {
     api_host: import.meta.env.VITE_POSTHOG_HOST?.trim() || 'https://us.i.posthog.com',
-    autocapture: false,
-    rageclick: false,
-    capture_pageview: false,
-    capture_pageleave: false,
-    capture_dead_clicks: false,
-    capture_exceptions: false,
-    capture_heatmaps: false,
-    capture_performance: false,
-    disable_session_recording: true,
+    defaults: '2026-06-25',
+    autocapture: true,
+    rageclick: true,
+    capture_pageview: 'history_change',
+    capture_pageleave: true,
+    capture_dead_clicks: true,
+    capture_exceptions: true,
+    capture_heatmaps: true,
+    capture_performance: { network_timing: true, web_vitals: true },
+    disable_session_recording: false,
+    session_recording: {
+      maskAllInputs: true,
+      recordCrossOriginIframes: false,
+      recordHeaders: false,
+      recordBody: false,
+      captureCanvas: { recordCanvas: false },
+    },
     enable_recording_console_log: false,
-    advanced_disable_flags: true,
+    advanced_disable_flags: false,
     opt_out_capturing_by_default: true,
     opt_out_persistence_by_default: true,
     persistence: 'localStorage',
-    save_campaign_params: false,
-    save_referrer: false,
+    save_campaign_params: true,
+    save_referrer: true,
+    mask_all_text: true,
     mask_personal_data_properties: true,
-    custom_personal_data_properties: ['email'],
+    custom_personal_data_properties: [
+      'email',
+      'password',
+      'token',
+      'access_token',
+      'refresh_token',
+      'authorization',
+      'api_key',
+      'secret',
+      'code',
+      'invite',
+    ],
     person_profiles: 'identified_only',
+    before_send: sanitizeCapture,
   });
   initialized = true;
 }
@@ -82,11 +123,13 @@ async function activateAcceptedAnalytics(): Promise<void> {
   initializeClient(posthog);
   if (!initialized || readStoredConsent() !== 'accepted') return;
   posthog.opt_in_capturing({ captureEventName: false });
+  posthog.startSessionRecording();
   if (knownUserId) posthog.identify(knownUserId);
 }
 
 function disableLoadedAnalytics(): void {
   if (!client || !initialized) return;
+  client.stopSessionRecording();
   client.reset(true);
   client.opt_out_capturing();
 }
@@ -143,7 +186,10 @@ export function resetAnalyticsOnSignOut(): void {
   knownUserId = null;
   if (!client || !initialized) return;
   const consent = readStoredConsent();
+  client.stopSessionRecording();
   client.reset(true);
-  if (consent === 'accepted') client.opt_in_capturing({ captureEventName: false });
-  else client.opt_out_capturing();
+  if (consent === 'accepted') {
+    client.opt_in_capturing({ captureEventName: false });
+    client.startSessionRecording();
+  } else client.opt_out_capturing();
 }

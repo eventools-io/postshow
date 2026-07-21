@@ -47,16 +47,12 @@ export function isValidEmail(value: string): boolean {
   return trimmed.length > 0 && trimmed.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(trimmed);
 }
 
-export async function joinWaitlist(
-  email: string,
-  turnstileToken: string,
-  requestId: string
-): Promise<WaitlistResult> {
+export async function joinWaitlist(email: string, requestId: string): Promise<WaitlistResult> {
   const trimmed = email.trim();
   if (!isValidEmail(trimmed)) {
     return 'invalid';
   }
-  if (!turnstileToken || !requestId) return 'error';
+  if (!requestId) return 'error';
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
   const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   const functionName =
@@ -76,7 +72,6 @@ export async function joinWaitlist(
         body: JSON.stringify({
           request_id: requestId,
           email: trimmed,
-          turnstile_token: turnstileToken,
         }),
       }
     );

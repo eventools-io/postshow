@@ -56,11 +56,7 @@ const PROVIDERS = [
   {
     term: 'PostHog',
     detail:
-      'Optional Postshow product analytics only after consent. We disable autocapture and session recording.',
-  },
-  {
-    term: 'Cloudflare Turnstile',
-    detail: 'Bot and abuse prevention on sign-in, sign-up, and password-recovery forms.',
+      'Optional product events, interactions, page navigation, errors, performance, heatmaps, and masked session replay only after consent.',
   },
   {
     term: 'Selected model providers',
@@ -143,7 +139,7 @@ export function PrivacyPage() {
             {
               term: 'Optional product analytics',
               detail:
-                'A limited set of manually named product events and an opaque account identifier after you consent. We do not send names or email addresses to PostHog.',
+                'Product events, interactions, page navigation, errors, performance, heatmaps, and masked session replay after you consent, plus an opaque account identifier when signed in. We do not send names or email addresses to PostHog.',
             },
             {
               term: 'Deletion evidence',
@@ -272,11 +268,13 @@ export function PrivacyPage() {
       <LegalSection id="analytics" title="7. Optional analytics, cookies, and similar storage">
         <p className="m-0">
           Postshow&rsquo;s PostHog analytics are off until you make an affirmative choice. If you
-          accept, we load the analytics client, send manually instrumented events, and may associate
-          them with an opaque authentication user ID. Autocapture, page-view capture, session
-          replay, console capture, heatmaps, exception capture, and performance capture are
-          disabled. We do not send your name, email address, connector content, prompts, or model
-          output as analytics properties.
+          accept, we load the analytics client and may associate events with an opaque
+          authentication user ID. PostHog then records product events, interactions, page
+          navigation, dead and rage clicks, errors, web performance, heatmaps, and session replay.
+          Replay masks all page text and every form field. Console logs, network payloads and
+          headers, canvas content, and cross-origin frames are excluded, and URL queries and
+          fragments are removed before events are sent. We do not send your name, email address,
+          connector content, prompts, or model output as analytics properties.
         </p>
         <p className="m-0">
           Authentication, workspace selection, safe operation retries, billing handoff, invitation
@@ -285,8 +283,8 @@ export function PrivacyPage() {
           recovery stores only request references and random retry keys, never exported data or a
           signed download URL. An invitation bearer received in a URL fragment is immediately
           removed from the URL, held only in component memory, and never copied to a query string,
-          authentication redirect URL, or browser storage. Stripe and Cloudflare may use their own
-          essential browser technologies in payment and security flows. See the{' '}
+          authentication redirect URL, or browser storage. Stripe and Supabase may use their own
+          essential browser technologies in payment and authentication flows. See the{' '}
           <Link to="/cookies" className={LEGAL_TEXT_LINK_CLASS}>
             Cookies and Local Storage Notice
           </Link>{' '}

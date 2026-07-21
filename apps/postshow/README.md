@@ -35,12 +35,9 @@ pnpm --filter @eventools/postshow test
 pnpm --filter postshow build     # the CLI
 ```
 
-The production web build must provide `VITE_POSTSHOW_TURNSTILE_SITE_KEY`; sign-in, sign-up,
-password recovery, and waitlist admission fail closed without it. The waitlist calls
-`VITE_POSTSHOW_WAITLIST_FUNCTION` when set and otherwise uses `postshow-waitlist`. Local Auth
-development can explicitly set `VITE_POSTSHOW_TURNSTILE_BYPASS=true`, but waitlist development
-must use Cloudflare's Turnstile test site key with the matching server-side test secret because the
-admission endpoint requires a real token. The bypass is ignored by production builds.
+Supabase Auth requires email confirmation for new accounts. The waitlist calls
+`VITE_POSTSHOW_WAITLIST_FUNCTION` when set and otherwise uses `postshow-waitlist`; its public Edge
+endpoint applies keyed email/IP limits before the service-only database admission RPC.
 
 The authenticated workspace-export client calls
 `VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION` when set and otherwise uses

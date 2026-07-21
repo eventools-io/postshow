@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { SignInPage } from './SignInPage';
 
@@ -9,9 +9,6 @@ const mocks = vi.hoisted(() => ({
   signUp: vi.fn(),
   signInWithPassword: vi.fn(),
   fetchPublicReleaseGates: vi.fn(),
-  turnstileRender: vi.fn(),
-  turnstileReset: vi.fn(),
-  turnstileRemove: vi.fn(),
   workspace: {
     session: null as unknown,
     sessionLoading: false,
@@ -45,16 +42,6 @@ function LocationProbe() {
 
 describe('SignInPage recovery', () => {
   beforeEach(() => {
-    vi.stubEnv('VITE_POSTSHOW_TURNSTILE_SITE_KEY', '1x00000000000000000000AA');
-    vi.stubEnv('VITE_POSTSHOW_TURNSTILE_BYPASS', 'false');
-    Object.defineProperty(window, 'turnstile', {
-      configurable: true,
-      value: {
-        render: mocks.turnstileRender,
-        reset: mocks.turnstileReset,
-        remove: mocks.turnstileRemove,
-      },
-    });
     mocks.workspace.session = null;
     mocks.workspace.sessionLoading = false;
     mocks.workspace.sessionError = '';
@@ -70,24 +57,7 @@ describe('SignInPage recovery', () => {
       workspace_export: true,
       workspace_deletion: true,
     });
-    mocks.turnstileRender.mockReset().mockReturnValue('turnstile-widget');
-    mocks.turnstileReset.mockReset();
-    mocks.turnstileRemove.mockReset();
   });
-
-  async function solveTurnstile(action: string, token = 'turnstile-token') {
-    await waitFor(() =>
-      expect(mocks.turnstileRender).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({ action })
-      )
-    );
-    const matchingCall = [...mocks.turnstileRender.mock.calls]
-      .reverse()
-      .find((call) => (call[1] as { action?: unknown }).action === action);
-    const options = matchingCall?.[1] as { callback: (value: string) => void };
-    act(() => options.callback(token));
-  }
 
   it('requests a single-use password recovery link', async () => {
     render(
@@ -97,7 +67,6 @@ describe('SignInPage recovery', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: /forgot your password/i }));
-    await solveTurnstile('password_recovery');
     fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: 'owner@example.com' },
     });
@@ -106,7 +75,6 @@ describe('SignInPage recovery', () => {
     await waitFor(() =>
       expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith('owner@example.com', {
         redirectTo: expect.stringMatching(/\/signin\?mode=update$/),
-        captchaToken: 'turnstile-token',
       })
     );
     expect(await screen.findByText(/if an account exists/i)).toBeInTheDocument();
@@ -152,7 +120,7 @@ describe('SignInPage recovery', () => {
     expect(document.body).not.toHaveTextContent(/existing eventools logins|one account across/i);
   });
 
-  it('passes a one-attempt Turnstile token to sign-in and resets the widget', async () => {
+  it('signs in without a third-party challenge', async () => {
     render(
       <MemoryRouter initialEntries={['/signin']}>
         <SignInPage />
@@ -160,8 +128,7 @@ describe('SignInPage recovery', () => {
     );
     const passwordInput = screen.getByLabelText(/^password$/i);
     expect(passwordInput).not.toHaveAttribute('minlength');
-    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeDisabled();
-    await solveTurnstile('sign_in', 'single-use-token');
+    expect(screen.getByRole('button', { name: /^sign in$/i })).toBeEnabled();
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'owner@example.com' } });
     fireEvent.change(passwordInput, { target: { value: 'legacy-password' } });
     fireEvent.click(screen.getByRole('button', { name: /^sign in$/i }));
@@ -170,20 +137,17 @@ describe('SignInPage recovery', () => {
       expect(mocks.signInWithPassword).toHaveBeenCalledWith({
         email: 'owner@example.com',
         password: 'legacy-password',
-        options: { captchaToken: 'single-use-token' },
       })
     );
-    expect(mocks.turnstileReset).toHaveBeenCalledWith('turnstile-widget');
   });
 
-  it('passes Turnstile verification to account creation', async () => {
+  it('creates an account with legal proof and an explicit confirmation redirect', async () => {
     render(
       <MemoryRouter initialEntries={['/signin?mode=signup']}>
         <SignInPage />
       </MemoryRouter>
     );
     await screen.findByRole('heading', { name: /create your account/i });
-    await solveTurnstile('sign_up', 'signup-token');
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'new@example.com' } });
     fireEvent.change(screen.getByLabelText(/^password$/i), {
       target: { value: 'new-password-12' },
@@ -196,7 +160,6 @@ describe('SignInPage recovery', () => {
         email: 'new@example.com',
         password: 'new-password-12',
         options: {
-          captchaToken: 'signup-token',
           data: {
             postshow_legal_acceptance: {
               terms_version: '2026-07-21',
@@ -204,10 +167,10 @@ describe('SignInPage recovery', () => {
               context: 'signup',
             },
           },
+          emailRedirectTo: expect.stringMatching(/\/signin$/),
         },
       })
     );
-    expect(mocks.turnstileReset).toHaveBeenCalledWith('turnstile-widget');
   });
 
   it('allows only an invitation-linked signup while the public signup gate is closed', async () => {
@@ -236,7 +199,6 @@ describe('SignInPage recovery', () => {
     ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId('location')).not.toHaveTextContent(token));
     expect(screen.getByTestId('location')).toHaveTextContent('/signin?mode=signup&source=email');
-    await solveTurnstile('sign_up', 'invited-signup-token');
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'invitee@example.com' } });
     fireEvent.change(screen.getByLabelText(/^password$/i), {
       target: { value: 'invited-password-12' },
@@ -249,7 +211,6 @@ describe('SignInPage recovery', () => {
         email: 'invitee@example.com',
         password: 'invited-password-12',
         options: {
-          captchaToken: 'invited-signup-token',
           data: {
             postshow_legal_acceptance: {
               terms_version: '2026-07-21',

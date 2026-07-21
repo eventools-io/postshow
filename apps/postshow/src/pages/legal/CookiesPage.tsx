@@ -34,7 +34,8 @@ export function CookiesPage() {
         <p className="m-0">
           Postshow uses a small amount of browser storage to keep you signed in, make sensitive
           operations recoverable, and remember your privacy choice. Product analytics stay off until
-          you opt in. We do not use advertising cookies or session replay.
+          you opt in. We do not use advertising cookies. Session replay runs only after consent and
+          masks page text and all form fields.
         </p>
       }
     >
@@ -151,11 +152,13 @@ export function CookiesPage() {
           ]}
         />
         <p className="m-0">
-          With consent, we send a limited set of manually instrumented events and may associate them
-          with an opaque authentication user ID. We configure PostHog with autocapture, page-view
-          and page-leave capture, session recording, console capture, dead-click and rage-click
-          capture, exception capture, performance capture, and heatmaps disabled. We do not send
-          names, email addresses, connector data, prompts, or model output as analytics properties.
+          With consent, PostHog records manually instrumented events, autocaptured interactions,
+          page views and exits, dead and rage clicks, exceptions, web performance, heatmaps, and
+          session replay. Replay masks all page text and every form field. Console logs, request and
+          response bodies, request headers, canvas content, and cross-origin frames are not
+          recorded. URL queries and fragments are removed before events are sent. We may associate
+          events with an opaque authentication user ID, but do not send names, email addresses,
+          connector data, prompts, or model output as analytics properties.
         </p>
         <button type="button" onClick={openAnalyticsPreferences} className="mk-btn-dark">
           Open analytics choices
@@ -169,11 +172,6 @@ export function CookiesPage() {
               term: 'Stripe payment technology',
               detail:
                 'Stripe Checkout, Elements, Link, and fraud-prevention services may use cookies or device signals such as m, __stripe_mid, __stripe_sid, payment-session, or Link authentication entries. Which entries appear depends on the payment flow and Stripe configuration. Stripe uses them for secure payment, authentication, fraud prevention, and service analytics under its own privacy notice.',
-            },
-            {
-              term: 'Cloudflare Turnstile',
-              detail:
-                'The sign-in, sign-up, and password-recovery flows load Turnstile to distinguish legitimate users from automated abuse. Cloudflare receives the technical signals needed to issue and validate a short-lived challenge token and may use essential browser storage under its Turnstile privacy terms.',
             },
             {
               term: 'Supabase authentication',

@@ -50,7 +50,6 @@ describe('Postshow legal policies', () => {
       'Metronome',
       'Resend',
       'PostHog',
-      'Cloudflare Turnstile',
       'Selected model providers',
     ]) {
       expect(screen.getByText(provider, { selector: 'dt' })).toBeInTheDocument();
@@ -78,7 +77,7 @@ describe('Postshow legal policies', () => {
     expect(screen.getByText(/postshow\.analytics-consent\.v1/i)).toBeInTheDocument();
     expect(screen.getByText(/postshow\.operation\.invitation:<sha256>/i)).toBeInTheDocument();
     expect(screen.getByText(/Postshow analytics are disabled by default/i)).toBeInTheDocument();
-    expect(screen.getByText(/session recording.*disabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/session replay.*consent/i)).toBeInTheDocument();
     expect(screen.getByText(/invitation bearers are not browser storage/i)).toBeInTheDocument();
     expect(screen.getByText(/not copied into a query string/i)).toBeInTheDocument();
     expect(

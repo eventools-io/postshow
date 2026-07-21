@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   optIn: vi.fn(),
   optOut: vi.fn(),
   reset: vi.fn(),
+  startSessionRecording: vi.fn(),
+  stopSessionRecording: vi.fn(),
   moduleLoads: vi.fn(),
 }));
 
@@ -20,6 +22,8 @@ vi.mock('posthog-js', () => {
       opt_in_capturing: mocks.optIn,
       opt_out_capturing: mocks.optOut,
       reset: mocks.reset,
+      startSessionRecording: mocks.startSessionRecording,
+      stopSessionRecording: mocks.stopSessionRecording,
     },
   };
 });
@@ -73,7 +77,7 @@ describe('analytics consent boundary', () => {
     expect(mocks.init).not.toHaveBeenCalled();
   });
 
-  it('loads only after acceptance with every automatic collection surface disabled', async () => {
+  it('loads rich product analytics only after acceptance with replay content masked', async () => {
     const { setAnalyticsConsent } = await analytics();
 
     setAnalyticsConsent('accepted');
@@ -83,21 +87,28 @@ describe('analytics consent boundary', () => {
     expect(mocks.init).toHaveBeenCalledWith(
       'phc_test',
       expect.objectContaining({
-        autocapture: false,
-        rageclick: false,
-        capture_pageview: false,
-        capture_pageleave: false,
-        capture_dead_clicks: false,
-        capture_exceptions: false,
-        capture_heatmaps: false,
-        capture_performance: false,
-        disable_session_recording: true,
-        advanced_disable_flags: true,
+        autocapture: true,
+        rageclick: true,
+        capture_pageview: 'history_change',
+        capture_pageleave: true,
+        capture_dead_clicks: true,
+        capture_exceptions: true,
+        capture_heatmaps: true,
+        capture_performance: { network_timing: true, web_vitals: true },
+        disable_session_recording: false,
+        session_recording: expect.objectContaining({
+          maskAllInputs: true,
+          recordHeaders: false,
+          recordBody: false,
+        }),
+        mask_all_text: true,
+        advanced_disable_flags: false,
         opt_out_capturing_by_default: true,
         opt_out_persistence_by_default: true,
       })
     );
     expect(mocks.optIn).toHaveBeenCalledWith({ captureEventName: false });
+    expect(mocks.startSessionRecording).toHaveBeenCalled();
   });
 
   it('captures and identifies only after explicit consent, without email properties', async () => {
@@ -127,6 +138,7 @@ describe('analytics consent boundary', () => {
 
     expect(window.localStorage.getItem('postshow.analytics-consent.v1')).toBe('declined');
     expect(mocks.reset).toHaveBeenCalledWith(true);
+    expect(mocks.stopSessionRecording).toHaveBeenCalled();
     expect(mocks.optOut).toHaveBeenCalled();
   });
 
@@ -142,5 +154,7 @@ describe('analytics consent boundary', () => {
 
     expect(mocks.reset).toHaveBeenCalledWith(true);
     expect(mocks.optIn).toHaveBeenCalledWith({ captureEventName: false });
+    expect(mocks.stopSessionRecording).toHaveBeenCalled();
+    expect(mocks.startSessionRecording).toHaveBeenCalled();
   });
 });

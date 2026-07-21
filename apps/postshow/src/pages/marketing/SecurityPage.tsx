@@ -42,7 +42,8 @@ const SUBPROCESSORS = [
   { name: 'Metronome', purpose: 'enterprise usage metering and billing reconciliation' },
   {
     name: 'PostHog',
-    purpose: 'optional, consent-based Postshow product events; no autocapture or session replay',
+    purpose:
+      'optional, consent-based product analytics, interaction capture, performance, errors, heatmaps, and masked session replay',
   },
   {
     name: 'Selected model provider',
@@ -50,7 +51,6 @@ const SUBPROCESSORS = [
       'evidence packets and generated output; hosted routes use Anthropic or OpenAI, while BYOK uses the provider you configure',
   },
   { name: 'Resend', purpose: 'transactional email (waitlist, account emails)' },
-  { name: 'Cloudflare Turnstile', purpose: 'bot and abuse prevention on authentication forms' },
 ];
 
 export function SecurityPage() {
