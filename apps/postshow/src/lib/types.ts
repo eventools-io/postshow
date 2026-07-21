@@ -54,7 +54,6 @@ export interface EngineTaskPref {
   provider?: EngineProvider;
   model?: string;
   effort?: EngineEffort;
-  base_url?: string;
 }
 
 export interface EngineSettings {
@@ -78,8 +77,42 @@ export interface UsageSummaryRow {
 export interface WorkspaceMember {
   user_id: string;
   email: string;
-  role: 'owner' | 'member';
+  role: 'owner' | 'admin' | 'member' | 'viewer';
   created_at: string;
+}
+
+export interface WorkspacePermissions {
+  workspace_id: string;
+  operate: boolean;
+  approve_actions: boolean;
+  manage_settings: boolean;
+  manage_members: boolean;
+  manage_billing: boolean;
+  delete_workspace: boolean;
+}
+
+export type InvitationRole = 'admin' | 'member' | 'viewer';
+export type InvitationState = 'active' | 'accepted' | 'revoked' | 'expired';
+export type InvitationDeliveryState = 'delivered' | 'failed';
+
+export interface WorkspaceInvitation {
+  id: string;
+  workspace_id: string;
+  email: string;
+  role: InvitationRole;
+  created_at: string;
+  expires_at: string;
+  accepted_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface InvitationDeliveryResult {
+  id: string;
+  workspace_name: string;
+  state: InvitationState;
+  expires_at: string;
+  link: string;
+  delivery_state: InvitationDeliveryState;
 }
 
 export interface Entitlements {
@@ -96,14 +129,30 @@ export interface ApiToken {
   workspace_id: string;
   name: string;
   token_prefix: string;
+  scopes: string[];
+  expires_at: string;
   created_at: string;
   last_used_at: string | null;
   revoked_at: string | null;
 }
 
+export interface ApiTokenCreationResult {
+  ok: true;
+  token: string;
+  token_prefix: string;
+  scopes: string[];
+  expires_at: string;
+}
+
 export type InboxKind = 'outreach' | 'ticket' | 'save_play' | 'expansion' | 'activation' | 'other';
-export type InboxState = 'pending' | 'approved' | 'skipped' | 'failed';
-export type ActionType = 'email' | 'github_issue' | 'linear_issue' | 'adopt_rule' | 'none';
+export type InboxState = 'pending' | 'approved' | 'skipped' | 'failed' | 'needs_review';
+export type ActionType =
+  | 'email'
+  | 'github_issue'
+  | 'linear_issue'
+  | 'adopt_rule'
+  | 'adopt_memory'
+  | 'none';
 
 export interface InboxItem {
   id: string;
@@ -117,6 +166,7 @@ export interface InboxItem {
   action_label: string;
   action_type: ActionType;
   action_config: Record<string, unknown>;
+  action_revision: number;
   state: InboxState;
   resolution: Record<string, unknown>;
   resolved_at: string | null;

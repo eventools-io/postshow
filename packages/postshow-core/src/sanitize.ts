@@ -71,83 +71,116 @@ function actionLabel(actionType: string): string {
 }
 
 const SCRATCHPAD_KEY = /^(pattern|noise|addressed|dedupe)-[a-z0-9-]{1,80}$/;
+const DURABLE_INSTRUCTION =
+  /\b(ignore|disregard|override|system prompt|developer message|instructions?|execute|run command|send (?:an )?email|api key|password|secret)\b/i;
 
-/** The model may put anything in any field: a string where we expect one, but
- * also numbers, objects, or arrays. Coerce scalars, drop the rest. */
-function str(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  return '';
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
-function arr(value: unknown): unknown[] {
+function array(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-export function sanitizeModelOutput(output: ModelOutput): CleanOutput {
+function stripUnsafeControlCharacters(value: string): string {
+  return Array.from(value)
+    .filter((character) => {
+      const code = character.charCodeAt(0);
+      return code > 31 || code === 9 || code === 10 || code === 13;
+    })
+    .join('');
+}
+
+function text(value: unknown, max: number): string {
+  return typeof value === 'string' ? stripUnsafeControlCharacters(value).slice(0, max) : '';
+}
+
+function actionConfig(actionType: string, value: unknown): Record<string, unknown> {
+  const raw = record(value);
+  if (actionType === 'email') {
+    // The model is deliberately unable to choose the recipient. A human must
+    // set it in the approval UI; the server binds that exact revision.
+    const subject = text(raw.subject, 200).trim();
+    return subject ? { subject } : {};
+  }
+  // GitHub and Linear destinations are bound to the saved connection, never
+  // accepted from model output.
+  return {};
+}
+
+export function sanitizeModelOutput(output: ModelOutput | unknown): CleanOutput {
+  const rawOutput = record(output);
   const fieldNotes: CleanFieldNote[] = [];
-  for (const raw of arr(output.field_notes).slice(0, OUTPUT_LIMITS.fieldNotes)) {
-    const note = (raw ?? {}) as NonNullable<ModelOutput['field_notes']>[number];
-    const title = str(note.title);
-    const fingerprint = str(note.fingerprint);
+  for (const value of array(rawOutput.field_notes).slice(0, OUTPUT_LIMITS.fieldNotes)) {
+    const note = record(value);
+    const title = text(note.title, 200);
+    const fingerprint = text(note.fingerprint, 120);
     if (!title || !fingerprint) continue;
     const sessions = Number(note.sessions ?? 0);
-    const severity = str(note.severity);
     fieldNotes.push({
-      title: title.slice(0, 200),
-      detail: str(note.detail).slice(0, 2000),
-      sessions: Number.isFinite(sessions) ? Math.max(0, Math.round(sessions)) : 0,
-      severity: SEVERITIES.has(severity) ? severity : 'medium',
-      fingerprint: fingerprint.slice(0, 120),
+      title,
+      detail: text(note.detail, 2000),
+      sessions: Number.isFinite(sessions)
+        ? Math.min(1_000_000_000, Math.max(0, Math.round(sessions)))
+        : 0,
+      severity: SEVERITIES.has(String(note.severity ?? '')) ? String(note.severity) : 'medium',
+      fingerprint,
     });
   }
 
   const inboxItems: CleanInboxItem[] = [];
-  for (const raw of arr(output.inbox_items).slice(0, OUTPUT_LIMITS.inboxItems)) {
-    const item = (raw ?? {}) as NonNullable<ModelOutput['inbox_items']>[number];
-    const title = str(item.title);
+  for (const value of array(rawOutput.inbox_items).slice(0, OUTPUT_LIMITS.inboxItems)) {
+    const item = record(value);
+    const title = text(item.title, 300);
     if (!title) continue;
-    const kind = str(item.kind);
-    const rawAction = str(item.action_type);
-    const actionType = ACTION_TYPES.has(rawAction) ? rawAction : 'none';
+    // adopt_rule is reserved for a server-created proposal; model output can
+    // never install a durable instruction by smuggling that action type.
+    const requestedAction = String(item.action_type ?? '');
+    const actionType =
+      ACTION_TYPES.has(requestedAction) && requestedAction !== 'adopt_rule'
+        ? requestedAction
+        : 'none';
     inboxItems.push({
-      kind: INBOX_KINDS.has(kind) ? kind : 'other',
-      meta: str(item.meta).slice(0, 200),
-      title: title.slice(0, 300),
-      body: str(item.body).slice(0, 10000),
-      evidence: str(item.evidence).slice(0, 500),
+      kind: INBOX_KINDS.has(String(item.kind ?? '')) ? String(item.kind) : 'other',
+      meta: text(item.meta, 200),
+      title,
+      body: text(item.body, 10000),
+      evidence: text(item.evidence, 500),
       action_label: actionLabel(actionType),
       action_type: actionType,
-      action_config:
-        item.action_config && typeof item.action_config === 'object' ? item.action_config : {},
-      account_name: str(item.account_name).slice(0, 200),
-      fingerprint: str(item.fingerprint).slice(0, 120),
+      action_config: actionConfig(actionType, item.action_config),
+      account_name: text(item.account_name, 200),
+      fingerprint: text(item.fingerprint, 120),
     });
   }
 
   const accountUpdates: CleanAccountUpdate[] = [];
-  for (const raw of arr(output.account_updates).slice(0, OUTPUT_LIMITS.accountUpdates)) {
-    const update = (raw ?? {}) as NonNullable<ModelOutput['account_updates']>[number];
-    const name = str(update.name);
+  for (const value of array(rawOutput.account_updates).slice(0, OUTPUT_LIMITS.accountUpdates)) {
+    const update = record(value);
+    const name = text(update.name, 200);
     if (!name) continue;
-    const tone = str(update.status_tone);
     const score = Number(update.health_score);
     accountUpdates.push({
-      name: name.slice(0, 200),
-      status: (str(update.status) || 'active').slice(0, 60),
-      status_tone: STATUS_TONES.has(tone) ? tone : 'good',
-      facts: arr(update.facts)
+      name,
+      status: text(update.status ?? 'active', 60) || 'active',
+      status_tone: STATUS_TONES.has(String(update.status_tone ?? ''))
+        ? String(update.status_tone)
+        : 'good',
+      facts: array(update.facts)
         .filter((f): f is string => typeof f === 'string')
+        .map((fact) => text(fact, 500))
         .slice(0, 8),
-      next_move: str(update.next_move).slice(0, 500),
+      next_move: text(update.next_move, 500),
       health_score: Number.isFinite(score) ? Math.min(100, Math.max(0, Math.round(score))) : null,
     });
   }
 
   let proposedJob: CleanProposedJob | null = null;
-  const rawJob = output.proposed_job;
-  const jobLabel = rawJob && typeof rawJob === 'object' ? str(rawJob.label) : '';
-  if (rawJob && jobLabel) {
+  const rawJob = record(rawOutput.proposed_job);
+  const jobLabel = text(rawJob.label, 200);
+  if (jobLabel) {
     const minutes = Number(rawJob.interval_minutes);
     if (
       Number.isFinite(minutes) &&
@@ -155,30 +188,35 @@ export function sanitizeModelOutput(output: ModelOutput): CleanOutput {
       minutes <= MAX_INTERVAL_MINUTES
     ) {
       proposedJob = {
-        label: jobLabel.slice(0, 200),
-        reason: str(rawJob.reason).slice(0, 500),
+        label: jobLabel,
+        reason: text(rawJob.reason, 500),
         interval_minutes: clampIntervalMinutes(minutes),
-        schedule_label: (str(rawJob.schedule_label) || 'proposed').slice(0, 100),
+        schedule_label: text(rawJob.schedule_label ?? 'proposed', 100) || 'proposed',
       };
     }
   }
 
   const proposedRule =
-    typeof output.proposed_rule === 'string' && output.proposed_rule.trim()
-      ? output.proposed_rule.trim().slice(0, OUTPUT_LIMITS.ruleChars)
+    typeof rawOutput.proposed_rule === 'string' && rawOutput.proposed_rule.trim()
+      ? text(rawOutput.proposed_rule.trim(), OUTPUT_LIMITS.ruleChars)
       : null;
 
   const scratchpadUpdates: CleanScratchpadEntry[] = [];
-  for (const raw of arr(output.scratchpad_updates).slice(0, OUTPUT_LIMITS.scratchpadUpdates)) {
-    const entry = (raw ?? {}) as NonNullable<ModelOutput['scratchpad_updates']>[number];
-    const key = str(entry.key).trim().toLowerCase();
-    const content = str(entry.content);
-    if (!key || !content || !SCRATCHPAD_KEY.test(key)) continue;
-    scratchpadUpdates.push({ key, content: content.slice(0, 600) });
+  for (const value of array(rawOutput.scratchpad_updates).slice(
+    0,
+    OUTPUT_LIMITS.scratchpadUpdates
+  )) {
+    const entry = record(value);
+    const key = text(entry.key, 100).trim().toLowerCase();
+    const content = text(entry.content, 600).replace(/\s+/g, ' ').trim();
+    if (!key || !content) continue;
+    if (!SCRATCHPAD_KEY.test(key)) continue;
+    if (DURABLE_INSTRUCTION.test(content)) continue;
+    scratchpadUpdates.push({ key, content });
   }
 
   return {
-    summary: str(output.summary).slice(0, OUTPUT_LIMITS.summaryChars) || 'Run complete.',
+    summary: text(rawOutput.summary, OUTPUT_LIMITS.summaryChars) || 'Run complete.',
     fieldNotes,
     inboxItems,
     accountUpdates,

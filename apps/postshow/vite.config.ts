@@ -15,7 +15,9 @@ export default defineConfig({
   },
   server: {
     port: 5176,
-    strictPort: false,
+    // The desktop shell trusts this exact origin; never fall through to a
+    // different port while an unrelated process is listening on 5176.
+    strictPort: true,
     host: true,
   },
   build: {

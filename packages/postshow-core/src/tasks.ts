@@ -10,6 +10,7 @@ import {
   type ModelTier,
   getModel,
   getProvider,
+  isHostedModel,
   tierDefault,
 } from './catalog';
 
@@ -23,7 +24,7 @@ export const TASK_CLASS_INFO: Record<
 > = {
   narration: {
     label: 'Session watcher',
-    hint: 'Narrates every session sweep. Runs constantly, so it defaults to the fast tier.',
+    hint: 'Narrates a bounded session sample on each sweep, so it defaults to the fast tier.',
     tier: 'fast',
     effort: 'low',
   },
@@ -53,7 +54,6 @@ export interface TaskPref {
   provider?: EngineProviderId;
   model?: string;
   effort?: EffortLevel;
-  base_url?: string;
 }
 
 /** The workspace default engine row (postshow_engine_settings). */
@@ -87,13 +87,20 @@ export function resolveTaskEngine(
   const info = TASK_CLASS_INFO[taskClass];
   const pref = prefs?.[taskClass] ?? {};
   const mode = pref.mode ?? defaults?.mode ?? 'byok';
-  let provider =
-    pref.provider ??
-    (mode === 'hosted' ? HOSTED_DEFAULT_PROVIDER : (defaults?.provider ?? 'anthropic'));
+  const requestedProvider =
+    pref.provider ?? defaults?.provider ?? (mode === 'local' ? 'ollama' : 'anthropic');
+  let provider = requestedProvider;
   if (!getProvider(provider)) provider = 'anthropic';
   if (mode === 'hosted' && !getProvider(provider)?.hosted) provider = HOSTED_DEFAULT_PROVIDER;
+  if (mode === 'local' && provider !== 'ollama' && provider !== 'compatible') provider = 'ollama';
 
-  let model = pref.model ?? '';
+  // A mode/provider coercion must not carry a curated cloud model into a
+  // local or hosted engine. Only an override explicitly paired with the final
+  // provider may supply a model across that boundary.
+  let model =
+    provider === requestedProvider || pref.provider === provider ? (pref.model ?? '') : '';
+  if (mode === 'local' && pref.provider === undefined && defaults?.provider !== provider)
+    model = '';
   if (!model && pref.provider === undefined && defaults?.provider === provider && defaults?.model) {
     // Only inherit the default model when the provider was inherited too; a
     // per-task provider switch should not drag along another provider's model.
@@ -105,8 +112,35 @@ export function resolveTaskEngine(
     model = '';
   }
   if (!model) model = tierDefault(provider, info.tier)?.id ?? '';
+  const allowedHostedTiers: ModelTier[] =
+    info.tier === 'fast'
+      ? ['fast']
+      : info.tier === 'standard'
+        ? ['fast', 'standard']
+        : ['fast', 'standard', 'frontier'];
+  if (
+    mode === 'hosted' &&
+    model &&
+    (!isHostedModel(provider, model) ||
+      !allowedHostedTiers.includes(getModel(provider, model)?.tier ?? 'frontier'))
+  ) {
+    model =
+      getProvider(provider)?.models.find(
+        (candidate) => candidate.tier === info.tier && candidate.hostedEligible === true
+      )?.id ??
+      getProvider(provider)?.models.find(
+        (candidate) =>
+          candidate.hostedEligible === true && allowedHostedTiers.includes(candidate.tier)
+      )?.id ??
+      '';
+  }
 
-  const baseUrl = pref.base_url ?? defaults?.base_url ?? '';
+  // Curated providers are permanently bound to their catalog origins. Custom
+  // endpoints are workspace-wide so one provider credential can never be
+  // rebound to a different target by a per-task override.
+  const customEndpoint = provider === 'compatible' || provider === 'ollama';
+  const inheritedBaseUrl = defaults?.provider === provider ? defaults.base_url : '';
+  const baseUrl = customEndpoint ? inheritedBaseUrl : '';
   return {
     taskClass,
     mode,

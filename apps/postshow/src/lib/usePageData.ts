@@ -7,27 +7,46 @@ interface PageData<T> {
   reload: () => void;
 }
 
+interface PageDataState<T> {
+  fetcher: () => Promise<T>;
+  data: T | null;
+  loading: boolean;
+  error: string;
+}
+
 /** Fetch-on-mount with manual reload. Refetches when `fetcher` identity
  * changes (callers memoize it against workspace id). */
 export function usePageData<T>(fetcher: () => Promise<T>): PageData<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [state, setState] = useState<PageDataState<T>>({
+    fetcher,
+    data: null,
+    loading: true,
+    error: '',
+  });
   const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError('');
-    fetcher()
+    setState((previous) => ({
+      fetcher,
+      data: previous.fetcher === fetcher ? previous.data : null,
+      loading: true,
+      error: '',
+    }));
+    Promise.resolve()
+      .then(fetcher)
       .then((result) => {
-        if (!cancelled) setData(result);
+        if (!cancelled) setState({ fetcher, data: result, loading: false, error: '' });
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setState({
+            fetcher,
+            data: null,
+            loading: false,
+            error: e instanceof Error ? e.message : 'Failed to load',
+          });
+        }
       });
     return () => {
       cancelled = true;
@@ -35,6 +54,12 @@ export function usePageData<T>(fetcher: () => Promise<T>): PageData<T> {
   }, [fetcher, nonce]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
+  const owned = state.fetcher === fetcher;
 
-  return { data, loading, error, reload };
+  return {
+    data: owned ? state.data : null,
+    loading: owned ? state.loading : true,
+    error: owned ? state.error : '',
+    reload,
+  };
 }

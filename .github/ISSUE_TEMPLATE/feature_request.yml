@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a public improvement to an open Postshow component.
+title: 'feat: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are public. Remove customer names, private data, credentials, and confidential roadmap details before submitting.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Web client
+        - Desktop client
+        - CLI or local runtime
+        - MCP server
+        - Shared engine
+        - Documentation
+        - Cross-component
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user problem and who encounters it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the result you need without prescribing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: guardrails
+    attributes:
+      label: Privacy and safety constraints
+      description: Note any read-only, local-only, human-approval, credential, or tenant-boundary requirements.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Public-content check
+      options:
+        - label: This request contains no credentials, personal data, customer content, or confidential roadmap information.
+          required: true

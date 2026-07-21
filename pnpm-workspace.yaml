@@ -1,3 +1,14 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# Electron's universal macOS build needs both native keyring architectures;
+# Windows release jobs use the same lockfile for x64/arm64 Credential Manager.
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - win32
+  cpu:
+    - arm64
+    - x64

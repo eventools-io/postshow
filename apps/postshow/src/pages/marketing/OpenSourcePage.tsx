@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
+import { LegalLinks } from '@/components/LegalLinks';
 import { PAGE_META, usePageMeta } from '@/lib/seo';
 
 const OPEN = [
@@ -15,7 +16,7 @@ const OPEN = [
   {
     name: 'The MCP server',
     detail:
-      'postshow mcp over stdio. Your coding agent reads dossiers and field notes, and approves with you in the loop.',
+      'postshow mcp over stdio. Your coding agent reads dossiers and field notes with scoped workspace access.',
   },
   {
     name: 'The desktop agent',
@@ -100,9 +101,10 @@ export function OpenSourcePage() {
             ))}
           </ul>
           <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            This split keeps the incentives honest. The free tier costs us nothing in model spend,
-            so it never needs to be killed. The hosted tiers are priced above their measured model
-            cost, so they never need a rug-pull. If we ever break that promise, fork us.
+            The current Free plan puts model usage on your provider account or local hardware. The
+            hosted tiers add the managed runtime and hosted model usage under the plan terms shown
+            at checkout. The MIT-licensed clients and engine remain available if a managed plan
+            stops fitting your needs.
           </p>
         </section>
 
@@ -112,16 +114,22 @@ export function OpenSourcePage() {
           </h2>
           <div className="mt-4 rounded-lg bg-night-0 p-5">
             <pre className="m-0 overflow-x-auto font-public-mono text-[13px] leading-[1.8] text-night-fg">
-              <code>{`npx postshow init      # detect your stack, verify every connector
+              <code>{`npx postshow init      # detect supported tools and guide setup
 postshow run           # execute due jobs with your keys or Ollama
-postshow inbox         # review what the agent drafted
+postshow inbox         # list and review what the agent drafted
 postshow mcp           # expose the workspace to your coding agent`}</code>
             </pre>
           </div>
           <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            Everything above develops in the open in one repository. Credentials never pass through
-            a model, connectors marked local-only never send raw data anywhere, and everything the
-            agent wants to do waits in an inbox for your approve.
+            Everything above develops in the open in one repository. Credentials never enter a model
+            prompt. A local-only connection keeps its key and raw source records off Postshow cloud;
+            a remote model still receives the evidence packet needed for that run, while Ollama
+            keeps model processing on-device. Postgres is always device-only: the runtime stores its
+            connection string and one owner-configured read-only SELECT in the OS credential store,
+            requires TLS for remote databases, bounds the rows it reads, and syncs only sanitized
+            derived findings. Those rows are part of the evidence packet and reach a remote BYOK
+            model if you select one. Supported outbound actions require an authenticated browser
+            review before they execute.
           </p>
         </section>
 
@@ -130,10 +138,12 @@ postshow mcp           # expose the workspace to your coding agent`}</code>
             Self-hosting, honestly
           </h2>
           <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            You can: the client surfaces run against any Supabase project carrying the Postshow
-            migrations, with your own keys. For most teams the hosted tier is less work than running
-            your own database plus a scheduler, and we do not support self-hosted deployments. The
-            license is your insurance against vendor risk, not our deployment recommendation.
+            The repository gives you inspectable client surfaces and the local runtime, but it does
+            not ship a supported one-command replacement for Postshow&rsquo;s hosted control plane.
+            Building and operating your own service from the MIT components is possible engineering
+            work, not a turnkey product claim: you own deployment, security, scheduling, billing,
+            upgrades, and compatibility. Eventools does not support or warrant self-managed
+            deployments unless a separate written agreement says otherwise.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <a href="/#waitlist" className="mk-btn-dark">
@@ -145,6 +155,14 @@ postshow mcp           # expose the workspace to your coding agent`}</code>
           </div>
         </section>
       </main>
+      <footer className="border-t border-shell-3">
+        <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-5 py-8 sm:flex-row sm:items-center sm:justify-between">
+          <span className="font-public-sans text-[12px] text-shell-fg-3">
+            © 2026 Eventools LLC
+          </span>
+          <LegalLinks />
+        </div>
+      </footer>
     </div>
   );
 }

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security disclosure
+    url: https://github.com/eventools-io/postshow/security/policy
+    about: Report a vulnerability privately before public disclosure.
+  - name: Hosted product, account, or billing support
+    url: https://github.com/eventools-io/postshow/blob/main/SUPPORT.md
+    about: Use the private support channel for customer-specific help.

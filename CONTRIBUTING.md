@@ -1,7 +1,9 @@
 # Contributing to Postshow
 
 Thanks for wanting to make Postshow better. Issues, bug reports, and pull
-requests are all welcome here.
+requests are welcome here when they contain no credentials, customer data, or
+private service context. Use [SUPPORT.md](SUPPORT.md) for private product help and
+[SECURITY.md](SECURITY.md) for vulnerability reports.
 
 ## How contributions work
 
@@ -33,8 +35,14 @@ pnpm install
 pnpm test          # unit tests across every package
 pnpm type-check
 pnpm build         # web app (with prerendered heads), cli, desktop shell
+pnpm governance:check
 ```
 
 Good first areas: connector adapters (packages/postshow-core/src/adapters.ts),
 the CLI wizard's stack detection (packages/postshow-cli/src/detect.ts), and
 provider support in the engine catalog.
+
+Participation in this repository follows
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The pull-request template asks for exact
+verification and explicit security, privacy, tenancy, licensing, and release-impact
+notes; complete it rather than deleting the checklist.

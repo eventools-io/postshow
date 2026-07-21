@@ -3,25 +3,41 @@
   "private": true,
   "version": "0.0.0",
   "description": "Postshow (postshow.io): the customer-intelligence teammate, by eventools. Open-core monorepo: web app, desktop agent, CLI, MCP server, and engine.",
+  "author": "Eventools LLC",
   "license": "MIT",
+  "homepage": "https://postshow.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/eventools-io/postshow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/eventools-io/postshow/issues",
+    "email": "support@eventools.io"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"
   },
   "packageManager": "pnpm@10.20.0",
   "scripts": {
-    "build": "pnpm -r build && node scripts/prerender-postshow-heads.mjs",
-    "build:postshow": "pnpm --filter @eventools/postshow build && node scripts/prerender-postshow-heads.mjs",
+    "build": "pnpm -r build && node scripts/prerender-postshow-heads.mjs && pnpm governance:check:built",
+    "build:postshow": "pnpm --filter @eventools/postshow build && node scripts/prerender-postshow-heads.mjs && pnpm governance:check:built",
     "lint": "pnpm -r --if-present lint",
     "type-check": "pnpm -r type-check",
-    "test": "pnpm -r --if-present test",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\""
+    "test": "pnpm -r --if-present test && pnpm governance:check",
+    "governance:check": "node --test scripts/check-repository-governance.test.mjs && node scripts/check-repository-governance.mjs",
+    "governance:check:built": "node scripts/check-repository-governance.mjs --built-site",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,json,md}\""
   },
   "devDependencies": {
     "prettier": "3.6.2"
   },
   "pnpm": {
+    "overrides": {
+      "@modelcontextprotocol/sdk>@hono/node-server": "2.0.11",
+      "tsup>esbuild": "0.28.1"
+    },
     "onlyBuiltDependencies": [
       "electron"
     ]

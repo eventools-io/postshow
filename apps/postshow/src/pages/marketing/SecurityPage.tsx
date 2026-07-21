@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Logo } from '@/components/Logo';
+import { LegalLinks } from '@/components/LegalLinks';
 import { PAGE_META, usePageMeta } from '@/lib/seo';
 
 const FLOWS = [
@@ -7,9 +8,10 @@ const FLOWS = [
     title: 'Stays in your accounts',
     highlighted: true,
     items: [
-      'Your PostHog, Stripe, Postgres, GitHub, Sentry data at rest',
-      'Local-only sources: raw rows are read at run time and discarded; only findings are stored',
-      'Your model API key is write-only: stored server-side, never returned to any client',
+      'Your PostHog, Stripe, GitHub, and Sentry source data at rest',
+      'Local-only sources: credentials and raw source records stay off Postshow cloud',
+      'Postgres: device-only connection string and one owner-configured, bounded read-only SELECT; remote databases require TLS',
+      'On-device Ollama runs keep the evidence packet and model processing on the device',
     ],
   },
   {
@@ -25,9 +27,10 @@ const FLOWS = [
     title: 'Sent to a model provider',
     highlighted: false,
     items: [
-      'Compressed evidence packets (event sequences, aggregates), per run',
+      'Purpose-built evidence packets (event sequences, account context, aggregates), per run',
       'BYOK tier: your key, your provider, your data-retention agreement',
-      'Hosted tier: zero-retention API options, never used for model training',
+      'Hosted tier: handling follows the contracted terms and account settings for the selected provider',
+      'Local-only plus a remote model still sends the evidence packet directly to that provider',
     ],
   },
 ];
@@ -36,12 +39,18 @@ const SUBPROCESSORS = [
   { name: 'Supabase', purpose: 'database, auth, and function hosting' },
   { name: 'Netlify', purpose: 'static hosting for this site and the app shell' },
   { name: 'Stripe', purpose: 'billing for the hosted plan' },
-  { name: 'PostHog', purpose: 'product analytics for Postshow itself (not your customer data)' },
+  { name: 'Metronome', purpose: 'enterprise usage metering and billing reconciliation' },
   {
-    name: 'Anthropic or OpenAI',
-    purpose: 'hosted-tier model calls only; BYOK calls go to your own provider account',
+    name: 'PostHog',
+    purpose: 'optional, consent-based Postshow product events; no autocapture or session replay',
+  },
+  {
+    name: 'Selected model provider',
+    purpose:
+      'evidence packets and generated output; hosted routes use Anthropic or OpenAI, while BYOK uses the provider you configure',
   },
   { name: 'Resend', purpose: 'transactional email (waitlist, account emails)' },
+  { name: 'Cloudflare Turnstile', purpose: 'bot and abuse prevention on authentication forms' },
 ];
 
 export function SecurityPage() {
@@ -68,9 +77,9 @@ export function SecurityPage() {
           Security
         </h1>
         <p className="m-0 mt-3 max-w-[64ch] font-public-sans text-[15px] leading-[1.6] text-shell-fg-2">
-          Postshow reads your product analytics, billing, and database. That deserves precision, not
-          marketing. This page states exactly what we store, what moves where, and what we can and
-          cannot claim yet.
+          Postshow reads your product analytics, billing, code, and error systems. That deserves
+          precision, not marketing. This page states what we store, what moves where, and what we
+          can and cannot claim yet.
         </p>
 
         <h2 className="mk-eyebrow m-0 mt-12 text-shell-fg-3">Where data lives</h2>
@@ -106,22 +115,31 @@ export function SecurityPage() {
 
         <h2 className="mk-eyebrow m-0 mt-12 text-shell-fg-3">Key handling</h2>
         <p className="m-0 mt-3 max-w-[68ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-          Connector and model keys are write-only. They are submitted once over TLS, stored in
-          tables no client role can read (verified by row-level security with no read policies, plus
-          revoked table grants), and touched only by the agent runtime at execution time. The app
-          can replace a key; nothing can display one. We ask for read-only, least-scope keys
-          everywhere a provider supports them, and the connection flow documents the exact scopes
-          each source needs.
+          Cloud connector and BYOK model keys are write-only. They are submitted once over TLS,
+          stored in Supabase Vault, and represented in application tables only by service-only
+          references that no browser role can read. The hosted runtime resolves a reference only
+          while executing work. Local-only credentials are stored in the operating system credential
+          store and are not synced to Postshow. The app can replace a key; it cannot display one. We
+          ask for read-only, least-scope keys everywhere a provider supports them. Postgres is a
+          stricter device-only path: its connection string and configured query remain in the OS
+          credential store, the runtime accepts one bounded read-only SELECT, and non-loopback
+          databases must explicitly require TLS. Query rows can enter the evidence packet sent to
+          the selected local or BYOK model on that device; only sanitized derived findings sync into
+          the Postshow workspace.
         </p>
 
         <h2 className="mk-eyebrow m-0 mt-12 text-shell-fg-3">Retention and training</h2>
         <p className="m-0 mt-3 max-w-[68ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-          Your data is never used to train models, ours or anyone&rsquo;s. On the BYOK tier, model
-          calls go to your own provider account under your own data-processing agreement. On the
-          hosted tier, calls use provider zero-retention options: prompts and outputs live for the
-          request, then they are gone. Run logs keep the agent&rsquo;s findings and evidence
-          summaries, not raw source rows, and you can delete a workspace and everything in it at any
-          time.
+          Model-provider handling follows the API account settings and contractual terms that apply
+          to each run. BYOK calls use your provider account and agreement; hosted calls use the
+          configured Eventools provider account. We describe a route as &ldquo;not used for
+          training&rdquo; or &ldquo;zero retention&rdquo; only when those applicable terms and
+          account settings support it. Postshow run records keep findings and evidence summaries
+          rather than raw source rows. Workspace deletion removes tenant content, connector and
+          engine secrets, API tokens, and active provider resources. Redacted financial and deletion
+          proof, containing no credentials, provider routing IDs, or raw provider receipts, is
+          retained for seven years where accounting and fraud controls require it; the requester can
+          retrieve the completion receipt for 30 days.
         </p>
 
         <h2 className="mk-eyebrow m-0 mt-12 text-shell-fg-3">Sub-processors</h2>
@@ -139,10 +157,15 @@ export function SecurityPage() {
 
         <h2 className="mk-eyebrow m-0 mt-12 text-shell-fg-3">Compliance status</h2>
         <p className="m-0 mt-3 max-w-[68ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-          Stated precisely: Postshow is not SOC 2 certified today. We follow the underlying controls
-          (least-privilege access, encrypted transport and storage, audit logging via run records)
-          and a formal report is planned alongside the hosted tier. A DPA is available on request
-          before then. If a claim on this page ever stops being true, the page changes the same day.
+          Stated precisely: Postshow is not SOC 2 certified today. The technical controls and
+          retention boundaries above are the current security evidence; they are not a substitute
+          for an independent certification. If your use requires a security review, a data
+          processing agreement, or handling terms for regulated data, contact us before enabling the
+          hosted tier at{' '}
+          <a href="mailto:security@eventools.io" className="text-signal-deep hover:text-shell-fg">
+            security@eventools.io
+          </a>
+          .
         </p>
 
         <p className="m-0 mt-12 font-public-sans text-[14px] text-shell-fg-2">
@@ -154,9 +177,12 @@ export function SecurityPage() {
       </main>
 
       <footer className="border-t border-shell-3">
-        <div className="mx-auto flex w-full max-w-[860px] items-center justify-between px-5 py-8 font-public-sans text-[13px] text-shell-fg-3">
-          <span>an eventools product</span>
-          <span>© 2026 eventools</span>
+        <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-5 py-8 font-public-sans text-[13px] text-shell-fg-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <span>an eventools product</span>
+            <span>© 2026 Eventools LLC</span>
+          </div>
+          <LegalLinks />
         </div>
       </footer>
     </div>

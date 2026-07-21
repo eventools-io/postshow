@@ -12,18 +12,41 @@ concurrency:
 permissions:
   contents: read
 
-# Linux jobs run on the eventools self-hosted pool while this repo is private
-# (via the CI_GENERAL_RUNNER_LABELS_JSON repo variable). When the repo goes
-# public, DELETE that variable so jobs fall back to GitHub-hosted
-# ubuntu-latest - fork PRs must never reach self-hosted runners.
+# Linux jobs use the private eventools pool while the repository is private.
+# Delete CI_GENERAL_RUNNER_LABELS_JSON before accepting fork pull requests in a
+# public repository so untrusted code falls back to GitHub-hosted runners.
 jobs:
   quality:
     name: Quality (lint, types, tests, builds)
     runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: ./.github/actions/setup-node-pnpm
+      - name: Lint GitHub Actions workflows
+        # Exact commit behind actionlint v1.7.12 plus a checksum-pinned
+        # ShellCheck 0.11.0, so embedded shell is checked without runner drift.
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools_dir="$(mktemp -d)"
+          trap 'rm -rf "$tools_dir"' EXIT
+          shellcheck_archive="$tools_dir/shellcheck-v0.11.0.linux.x86_64.tar.xz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz \
+            -o "$shellcheck_archive"
+          printf '%s  %s\n' \
+            '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198' \
+            "$shellcheck_archive" | sha256sum -c -
+          tar -xJf "$shellcheck_archive" -C "$tools_dir"
+          "$tools_dir/shellcheck-v0.11.0/shellcheck" --version
+          # GitHub's current concurrency syntax supports queue:max, but
+          # actionlint 1.7.12 still exposes the older two-key schema. Ignore
+          # only that exact schema-lag message; every other finding still fails.
+          go run github.com/rhysd/actionlint/cmd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca \
+            -ignore='^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$' \
+            -shellcheck="$tools_dir/shellcheck-v0.11.0/shellcheck" \
+            .github/workflows/*.yml
       - name: Format check
         run: pnpm format:check
       - name: Lint
@@ -35,10 +58,11 @@ jobs:
       - name: Build everything
         run: pnpm build
       - name: Upload site build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: postshow-site
           path: apps/postshow/dist
+          overwrite: true
           retention-days: 7
 
   audit:
@@ -46,10 +70,10 @@ jobs:
     runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: ./.github/actions/setup-node-pnpm
-      - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
+      - name: Audit all release and runtime dependencies
+        run: pnpm audit --audit-level low
 
   unslop:
     name: Unslop Checks
@@ -57,7 +81,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
       - name: Gate added lines for AI-slop tells

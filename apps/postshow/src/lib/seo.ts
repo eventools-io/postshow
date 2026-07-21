@@ -18,22 +18,40 @@ export interface PageMeta {
 
 export const PAGE_META: Record<string, PageMeta> = {
   landing: {
-    title: 'Postshow · the AI teammate that watches every user session',
+    title: 'Postshow · the AI teammate for customer intelligence',
     description:
-      'Postshow watches every product session, works out why users convert, stall, or churn, and hands you drafted emails, tickets, and plays. Open source, free with your own keys, hosted from $99/mo.',
+      'Postshow samples product behavior, investigates why users convert, stall, or churn, and hands you drafted emails, tickets, and plays. Open source, free with your own keys, hosted from $99/mo.',
     path: '/',
   },
   security: {
     title: 'Security and data flow · Postshow',
     description:
-      'Where your customer data goes and where it never goes: write-only keys, local-only connectors, read-only gathering, and the full Postshow data-flow map.',
+      'How Postshow handles customer data: write-only keys, local-only connector boundaries, selected model providers, retention, and deletion.',
     path: '/security',
   },
   openSource: {
     title: 'Open source · Postshow',
     description:
-      'Postshow is open core: the app, CLI, MCP server, desktop agent, and engine are MIT; the always-on cloud is the business. Self-host it, or let us run it.',
+      'Postshow is open core: the app, CLI, MCP server, desktop agent, and engine are MIT; the supported always-on cloud runtime is the business.',
     path: '/open-source',
+  },
+  terms: {
+    title: 'Terms of Service · Postshow',
+    description:
+      'The terms for Postshow accounts, hosted service, AI output, connected sources, billing, export, and deletion.',
+    path: '/terms',
+  },
+  privacy: {
+    title: 'Privacy Policy · Postshow',
+    description:
+      'How Eventools LLC collects, processes, shares, retains, exports, and deletes information when you use Postshow.',
+    path: '/privacy',
+  },
+  cookies: {
+    title: 'Cookies and local storage · Postshow',
+    description:
+      'The essential browser storage Postshow uses and how optional, consent-based PostHog analytics work.',
+    path: '/cookies',
   },
   signin: {
     title: 'Sign in · Postshow',

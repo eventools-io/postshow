@@ -19,8 +19,10 @@ export function nextCronDate(cron: string | null, from: Date): Date {
   const minute = Number(parts[0]);
   const hour = Number(parts[1]);
   const dow = parts[4] === '*' ? null : Number(parts[4]);
-  if (!Number.isFinite(minute) || !Number.isFinite(hour)) return fallback;
-  if (dow !== null && !Number.isFinite(dow)) return fallback;
+  if (parts[2] !== '*' || parts[3] !== '*') return fallback;
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59) return fallback;
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23) return fallback;
+  if (dow !== null && (!Number.isInteger(dow) || dow < 0 || dow > 6)) return fallback;
   const next = new Date(from);
   next.setUTCHours(hour, minute, 0, 0);
   while (next <= from || (dow !== null && next.getUTCDay() !== dow)) {

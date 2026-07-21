@@ -3,6 +3,7 @@ import { PillNav } from '@/components/marketing/PillNav';
 import { WaitlistForm } from '@/components/marketing/WaitlistForm';
 import { Demo } from '@/components/demo/Demo';
 import { Logo } from '@/components/Logo';
+import { LegalLinks } from '@/components/LegalLinks';
 import { PAGE_META, usePageMeta } from '@/lib/seo';
 
 const STACK = [
@@ -21,7 +22,7 @@ const STEPS = [
   {
     number: '01',
     title: 'Connect your stack',
-    body: 'PostHog, Stripe, your Postgres, GitHub. Read-only, five minutes. Pick an engine: your API key, local models, or let the hosted tier bring its own.',
+    body: 'PostHog, Stripe, Postgres, GitHub, Sentry. Start with least-scope access, then pick an engine: your API key, local Ollama, or a hosted model.',
   },
   {
     number: '02',
@@ -39,8 +40,8 @@ const CAPABILITIES = [
   {
     number: '01',
     tag: 'Watch',
-    title: 'Every session, narrated',
-    body: 'Not a 2% replay sample. Postshow narrates each session: where people flowed, hesitated, and what they clicked that did nothing.',
+    title: 'High-signal sessions, narrated',
+    body: 'Postshow prioritizes a bounded sample of useful sessions: where people flowed, hesitated, and what they clicked that did nothing.',
   },
   {
     number: '02',
@@ -70,7 +71,7 @@ const CAPABILITIES = [
     number: '06',
     tag: 'Private',
     title: 'Local-first by design',
-    body: 'Mark any source local-only and raw data never leaves your runtime. Bring your own keys or your own models.',
+    body: 'Mark a supported source local-only to keep its credentials and raw records off Postshow cloud. Postgres is always device-only and runs one owner-configured, bounded read-only SELECT. Use Ollama to keep model processing on-device too.',
   },
 ];
 
@@ -78,7 +79,7 @@ const TIERS = [
   {
     name: 'Free',
     price: '$0',
-    blurb: 'The whole product on your keys or your hardware. Open source, forever.',
+    blurb: 'Use your keys or your hardware with the current open-source Free plan.',
     points: [
       'Any provider in the catalog, or local models via Ollama',
       'Web, desktop, CLI, and MCP server',
@@ -93,7 +94,7 @@ const TIERS = [
     blurb: 'Always-on. The agent works with your laptop closed, on our model bill.',
     points: [
       '3,000 sessions watched and 20 deep dives a month, included',
-      'Hosted models across seven providers, chosen per task',
+      'Hosted Anthropic and OpenAI models, chosen per task',
       'Cloud schedule: nightly sweeps, weekly deep dives, standing recon',
       'Over a budget it degrades gracefully; it never surprise-bills',
     ],
@@ -117,8 +118,8 @@ const TIERS = [
     blurb: 'For teams with rules about where data lives.',
     points: [
       'Custom quotas, seats, and usage billed on your terms',
-      'SSO and admin controls',
-      'Self-hosted and local-model deployment support',
+      'Contract billing with metered usage reconciliation',
+      'Security review and custom entitlement planning',
       'Direct line to the team',
     ],
     highlighted: false,
@@ -132,7 +133,7 @@ const FAQ = [
   },
   {
     q: 'Where does my customer data go?',
-    a: 'Keys are write-only and stored server-side where no client can read them. Any source you mark local-only keeps its credentials on your machine; runs happen locally and only derived findings sync. The full data-flow map is on the security page.',
+    a: "Cloud connector and synced BYOK keys are write-only and stored server-side where no client role can read them. A local-only source keeps its credential and raw records on your device. Postgres is always device-only: it runs one owner-configured, bounded read-only SELECT, requires TLS for a remote database, and syncs only sanitized derived findings. A remote BYOK model still receives that run's evidence packet directly from your device; Ollama keeps model processing on-device. The full data-flow map is on the security page.",
   },
   {
     q: 'Which models does it use?',
@@ -140,7 +141,7 @@ const FAQ = [
   },
   {
     q: 'What does it cost?',
-    a: 'Free with your own keys or local models, forever, and that tier is open source. Hosted is $99/mo (Solo) or $249/mo (Team), priced in sessions watched and deep dives, never tokens. Every tier is priced to be profitable on its own, so none of them is a loss-leader waiting to be killed.',
+    a: 'The current Free plan uses your own keys or local models and is open source. Hosted is $99/mo (Solo) or $249/mo (Team), with current self-service terms based on sessions watched and deep dives rather than tokens. Checkout and your applicable order show the authoritative plan terms.',
   },
   {
     q: 'Is it really open source?',
@@ -170,7 +171,7 @@ const SURFACES = [
   },
   {
     name: 'MCP',
-    detail: 'Your coding agent reads the dossiers and approves with you in the loop.',
+    detail: 'Your coding agent reads dossiers and field notes with scoped workspace access.',
     code: 'postshow mcp',
   },
 ];
@@ -181,7 +182,7 @@ function Hero() {
       <div className="aurora" aria-hidden />
       <div className="relative mx-auto flex max-w-[880px] flex-col items-center px-5 text-center">
         <p className="reveal reveal-1 m-0 font-public-mono text-[12px] text-shell-fg-3">
-          <span className="text-signal-deep">$</span> postshow watch --all-sessions
+          <span className="text-signal-deep">$</span> postshow run
         </p>
         <h1 className="reveal reveal-2 m-0 mt-6 max-w-[16ch] font-public-sans text-[clamp(40px,6vw,76px)] font-semibold leading-[1.04] tracking-[-0.035em] text-shell-fg [text-wrap:balance]">
           What happened last night,
@@ -190,9 +191,9 @@ function Hero() {
           </em>
         </h1>
         <p className="reveal reveal-3 m-0 mt-7 max-w-[58ch] font-public-sans text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-shell-fg-2">
-          Postshow is an AI teammate for B2B SaaS. It watches every user session, finds out why
-          people convert, stall, or churn, and turns the answer into drafted emails, tickets, and
-          plays. You approve. It learns.
+          Postshow is an AI teammate for B2B SaaS. It samples product behavior and connected
+          signals, investigates why people convert, stall, or churn, and turns the answer into
+          drafted emails, tickets, and plays. You approve. It learns.
         </p>
         <div className="reveal reveal-4 mt-9 flex flex-wrap justify-center gap-3">
           <a href="#waitlist" className="mk-btn-dark">
@@ -407,11 +408,11 @@ function Pricing() {
       <div className="mt-8 rounded-lg border border-shell-3 bg-shell-1 p-6">
         <p className="mk-eyebrow m-0 text-signal-deep">a note on the numbers</p>
         <p className="m-0 mt-3 max-w-[72ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-          Every tier is priced to be profitable on its own. The free tier costs us nothing in model
-          spend, so it never needs to be killed; the hosted quotas are set from measured per-run
-          model cost with margin, so we never have to claw them back. Over a budget, the agent thins
-          its sampling and defers deep dives to next month instead of stopping or surprise-billing.
-          And if we ever get it wrong, the MIT license is your exit.
+          The Free plan puts model usage on your provider account or local hardware. Hosted quotas
+          are based on sessions watched and deep dives under the current checkout terms. Over an
+          included budget, the agent thins its sampling and defers deep dives to the next billing
+          period instead of surprise-billing. The MIT-licensed clients and engine remain available
+          if a managed plan stops fitting your needs.
         </p>
       </div>
     </section>
@@ -530,10 +531,14 @@ function SiteFooter() {
               Blog
             </a>
           </nav>
+          <div className="flex flex-col gap-2">
+            <span className="mk-eyebrow text-shell-fg-3">Legal &amp; support</span>
+            <LegalLinks layout="column" />
+          </div>
         </div>
       </div>
       <p className="m-0 mx-auto max-w-[1080px] border-t border-shell-3 px-5 py-6 font-public-sans text-[12px] text-shell-fg-3">
-        © 2026 eventools
+        © 2026 Eventools LLC
       </p>
     </footer>
   );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CONNECTORS, connectorFor } from './connectors';
+import { CONNECTORS, canonicalConnectionMeta, connectorFor } from './connectors';
 
 // Mirrors the CHECK constraint in the postshow_connections migration; a
 // provider the database rejects must never appear in the catalog.
@@ -54,5 +54,57 @@ describe('connector catalog', () => {
   it('looks up connectors by provider', () => {
     expect(connectorFor('posthog')?.name).toBe('PostHog');
     expect(connectorFor('ga4')?.implemented).toBe(false);
+  });
+
+  it('canonicalizes routing metadata before target comparison or writes', () => {
+    expect(
+      canonicalConnectionMeta('posthog', {
+        host: ' HTTPS://US.POSTHOG.COM:443/ ',
+        project_id: ' 12345 ',
+      })
+    ).toEqual({ project_id: '12345' });
+    expect(
+      canonicalConnectionMeta('posthog', {
+        host: 'https://EU.POSTHOG.COM:443/',
+        project_id: '12345',
+      })
+    ).toEqual({ host: 'https://eu.posthog.com', project_id: '12345' });
+    expect(canonicalConnectionMeta('github', { repo: ' Eventools/Postshow ' })).toEqual({
+      repo: 'Eventools/Postshow',
+    });
+    expect(canonicalConnectionMeta('linear', { team_key: ' eng ' })).toEqual({ team_key: 'ENG' });
+    expect(canonicalConnectionMeta('resend', { from: ' Owner@Example.COM ' })).toEqual({
+      from: 'owner@example.com',
+    });
+    expect(
+      canonicalConnectionMeta('sentry', {
+        org_slug: ' Eventools ',
+        project_slug: ' Web_App ',
+      })
+    ).toEqual({ org_slug: 'eventools', project_slug: 'web_app' });
+  });
+
+  it('rejects a PostHog URL that is not a public HTTPS origin', () => {
+    for (const host of [
+      'http://us.posthog.com',
+      'https://us.posthog.com/path',
+      'https://user@example.com',
+      'https://posthog.internal',
+      'https://127.0.0.1',
+    ]) {
+      expect(() => canonicalConnectionMeta('posthog', { host, project_id: '1' })).toThrow(
+        /https origin/i
+      );
+    }
+  });
+
+  it.each([
+    ['posthog', { project_id: 'project-1' }],
+    ['github', { repo: 'owner/repo/extra' }],
+    ['linear', { team_key: '1-BAD' }],
+    ['resend', { from: 'not-an-email' }],
+    ['sentry', { org_slug: 'bad slug', project_slug: 'frontend' }],
+  ] as const)('rejects a noncanonical %s target before an API write', (provider, meta) => {
+    expect(() => canonicalConnectionMeta(provider, meta)).toThrow();
   });
 });

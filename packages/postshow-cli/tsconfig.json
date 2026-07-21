@@ -2,6 +2,7 @@
   "extends": "@eventools/config/typescript",
   "compilerOptions": {
     "outDir": "./dist",
+    "incremental": false,
     "types": ["node", "vitest/globals"]
   },
   "include": ["src/**/*"],

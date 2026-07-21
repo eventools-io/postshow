@@ -5,6 +5,14 @@ interface ImportMetaEnv {
   readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string;
   readonly VITE_POSTHOG_KEY?: string;
   readonly VITE_POSTHOG_HOST?: string;
+  readonly VITE_POSTSHOW_BILLING_FUNCTION?: string;
+  readonly VITE_POSTSHOW_CHECKOUT_FUNCTION?: string;
+  readonly VITE_POSTSHOW_PLAN_CHANGE_FUNCTION?: string;
+  readonly VITE_POSTSHOW_WORKSPACE_DELETION_FUNCTION?: string;
+  readonly VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION?: string;
+  readonly VITE_POSTSHOW_WAITLIST_FUNCTION?: string;
+  readonly VITE_POSTSHOW_TURNSTILE_SITE_KEY?: string;
+  readonly VITE_POSTSHOW_TURNSTILE_BYPASS?: string;
 }
 
 interface ImportMeta {

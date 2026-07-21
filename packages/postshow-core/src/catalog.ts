@@ -38,6 +38,9 @@ export interface CatalogModel {
   /** USD per 1M output tokens (list price, 2026-07-20). */
   outputPerMtokUsd: number;
   contextWindow: number;
+  /** False when Postshow must not use this model with a platform-owned key.
+   * BYOK users may still select it after accepting the provider's terms. */
+  hostedEligible?: boolean;
 }
 
 export interface CatalogProvider {
@@ -63,20 +66,24 @@ export const CATALOG: CatalogProvider[] = [
     requiresKey: true,
     models: [
       {
-        id: 'claude-fable-5',
-        label: 'Claude Fable 5',
-        tier: 'frontier',
-        inputPerMtokUsd: 10,
-        outputPerMtokUsd: 50,
-        contextWindow: 1_000_000,
-      },
-      {
         id: 'claude-opus-4-8',
         label: 'Claude Opus 4.8',
         tier: 'frontier',
         inputPerMtokUsd: 5,
         outputPerMtokUsd: 25,
         contextWindow: 1_000_000,
+        hostedEligible: true,
+      },
+      {
+        id: 'claude-fable-5',
+        label: 'Claude Fable 5 (BYOK only)',
+        tier: 'frontier',
+        inputPerMtokUsd: 10,
+        outputPerMtokUsd: 50,
+        contextWindow: 1_000_000,
+        // Anthropic requires 30-day retention for Fable and does not make it
+        // available under ZDR arrangements. Never select it for hosted calls.
+        hostedEligible: false,
       },
       {
         id: 'claude-sonnet-5',
@@ -85,6 +92,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 3,
         outputPerMtokUsd: 15,
         contextWindow: 1_000_000,
+        hostedEligible: true,
       },
       {
         id: 'claude-haiku-4-5',
@@ -93,6 +101,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 1,
         outputPerMtokUsd: 5,
         contextWindow: 200_000,
+        hostedEligible: true,
       },
     ],
   },
@@ -111,6 +120,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 5,
         outputPerMtokUsd: 30,
         contextWindow: 1_050_000,
+        hostedEligible: true,
       },
       {
         id: 'gpt-5.6-terra',
@@ -119,6 +129,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 2.5,
         outputPerMtokUsd: 15,
         contextWindow: 1_050_000,
+        hostedEligible: true,
       },
       {
         id: 'gpt-5.6-luna',
@@ -127,6 +138,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 1,
         outputPerMtokUsd: 6,
         contextWindow: 1_050_000,
+        hostedEligible: true,
       },
       {
         id: 'gpt-5.4',
@@ -135,6 +147,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 2.5,
         outputPerMtokUsd: 15,
         contextWindow: 1_050_000,
+        hostedEligible: true,
       },
       {
         id: 'gpt-5.4-mini',
@@ -143,6 +156,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 0.75,
         outputPerMtokUsd: 4.5,
         contextWindow: 400_000,
+        hostedEligible: true,
       },
       {
         id: 'gpt-5.4-nano',
@@ -151,6 +165,7 @@ export const CATALOG: CatalogProvider[] = [
         inputPerMtokUsd: 0.2,
         outputPerMtokUsd: 1.25,
         contextWindow: 400_000,
+        hostedEligible: true,
       },
     ],
   },
@@ -159,7 +174,7 @@ export const CATALOG: CatalogProvider[] = [
     label: 'Moonshot (Kimi)',
     wire: 'openai-chat',
     baseUrl: 'https://api.moonshot.ai/v1',
-    hosted: true,
+    hosted: false,
     requiresKey: true,
     models: [
       {
@@ -193,12 +208,12 @@ export const CATALOG: CatalogProvider[] = [
     label: 'Z.ai (GLM)',
     wire: 'openai-chat',
     baseUrl: 'https://api.z.ai/api/paas/v4',
-    hosted: true,
+    hosted: false,
     requiresKey: true,
     models: [
       {
-        id: 'glm-5.2',
-        label: 'GLM-5.2',
+        id: 'glm-5.1',
+        label: 'GLM-5.1',
         tier: 'frontier',
         inputPerMtokUsd: 1.4,
         outputPerMtokUsd: 4.4,
@@ -235,7 +250,7 @@ export const CATALOG: CatalogProvider[] = [
     label: 'DeepSeek',
     wire: 'openai-chat',
     baseUrl: 'https://api.deepseek.com',
-    hosted: true,
+    hosted: false,
     requiresKey: true,
     models: [
       {
@@ -261,7 +276,7 @@ export const CATALOG: CatalogProvider[] = [
     label: 'xAI (Grok)',
     wire: 'openai-chat',
     baseUrl: 'https://api.x.ai/v1',
-    hosted: true,
+    hosted: false,
     requiresKey: true,
     models: [
       {
@@ -287,11 +302,11 @@ export const CATALOG: CatalogProvider[] = [
     label: 'Mistral',
     wire: 'openai-chat',
     baseUrl: 'https://api.mistral.ai/v1',
-    hosted: true,
+    hosted: false,
     requiresKey: true,
     models: [
       {
-        id: 'mistral-large-3-25-12',
+        id: 'mistral-large-2512',
         label: 'Mistral Large 3',
         tier: 'standard',
         inputPerMtokUsd: 0.5,
@@ -299,7 +314,7 @@ export const CATALOG: CatalogProvider[] = [
         contextWindow: 262_144,
       },
       {
-        id: 'mistral-small-4-0-26-03',
+        id: 'mistral-small-2603',
         label: 'Mistral Small 4',
         tier: 'fast',
         inputPerMtokUsd: 0.15,
@@ -340,6 +355,15 @@ export function getModel(providerId: string, modelId: string): CatalogModel | nu
 /** Providers whose bill the hosted engine can carry. */
 export function hostedProviders(): CatalogProvider[] {
   return CATALOG.filter((p) => p.hosted);
+}
+
+export function isHostedModel(providerId: string, modelId: string): boolean {
+  const provider = getProvider(providerId);
+  if (!provider?.hosted) return false;
+  const model = getModel(providerId, modelId);
+  // Hosted billing and retention are fail-closed. A newly added model is BYOK
+  // until its exact economics and data contract are explicitly reviewed.
+  return Boolean(model?.hostedEligible === true);
 }
 
 /** The provider's default model for a tier, falling back down the ladder
