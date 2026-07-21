@@ -1,0 +1,87 @@
+name: Setup Node and pnpm
+description: Extract the repo pnpm version, configure pnpm and Node.js, and optionally install dependencies.
+
+# Trimmed port of the eventools.io composite of the same name. The per-job
+# pnpm dest and the flock around install matter on the self-hosted pool:
+# runner slots share one HOME, so the default ~/setup-pnpm dest and the
+# shared content-addressable store both race under concurrent jobs.
+
+inputs:
+  node-version:
+    description: Node.js version to install.
+    required: false
+    default: '24'
+  cache:
+    description: Dependency cache strategy for actions/setup-node, or 'none' to disable GitHub cache.
+    required: false
+    default: 'pnpm'
+  install-dependencies:
+    description: Whether to run pnpm install --frozen-lockfile.
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - name: Extract pnpm version from package.json
+      id: versions
+      shell: bash
+      run: |
+        PNPM_VERSION=$(jq -r '.packageManager' package.json | sed 's/pnpm@//g')
+        echo "pnpm=$PNPM_VERSION" >> "$GITHUB_OUTPUT"
+        echo "pnpm version: $PNPM_VERSION"
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: ${{ steps.versions.outputs.pnpm }}
+        dest: ${{ runner.temp }}/setup-pnpm-${{ github.run_id }}-${{ github.job }}
+
+    - name: Setup Node.js with GitHub cache
+      if: ${{ runner.environment != 'self-hosted' && inputs.cache != 'none' }}
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: ${{ inputs.cache }}
+
+    - name: Setup Node.js without GitHub cache
+      if: ${{ runner.environment == 'self-hosted' || inputs.cache == 'none' }}
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+        package-manager-cache: false
+
+    - name: Configure self-hosted pnpm store
+      if: ${{ runner.environment == 'self-hosted' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        store_dir="${CI_PNPM_STORE_DIR:-$HOME/.cache/eventools/pnpm-store}"
+        mkdir -p "$store_dir"
+        pnpm config set --global store-dir "$store_dir"
+
+        echo "Using self-hosted pnpm store: $(pnpm store path)"
+
+    - name: Install dependencies
+      if: ${{ inputs.install-dependencies == 'true' }}
+      shell: bash
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
+      run: |
+        set -euo pipefail
+
+        install_dependencies() {
+          pnpm install --frozen-lockfile
+        }
+
+        if [ "$RUNNER_ENVIRONMENT" = "self-hosted" ] && command -v flock >/dev/null 2>&1; then
+          exec 9>"/tmp/eventools-pnpm-store-maintenance.lock"
+          # pnpm's shared content-addressable store is not safe for parallel
+          # installs on the same host; serialize installs as well as pruning.
+          flock -x 9
+          install_dependencies
+          exec 9>&-
+        else
+          install_dependencies
+        fi
