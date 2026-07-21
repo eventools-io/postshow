@@ -1,3 +1,4 @@
+import './http';
 import { parseArgs } from 'node:util';
 import { runInit } from './commands/init';
 import { runOnce, runWatch } from './commands/run';
