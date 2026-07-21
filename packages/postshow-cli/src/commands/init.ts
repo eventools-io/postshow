@@ -248,7 +248,11 @@ export async function runInit(): Promise<number> {
     config.token = token;
   }
 
-  const apiUrl = await ask('API URL', config.apiUrl);
+  const apiUrl = await ask('API URL (shown beside the token in Settings)', config.apiUrl);
+  if (!apiUrl) {
+    fail('the API URL is required; copy it from Settings next to your token');
+    return 1;
+  }
   config.apiUrl = apiUrl;
 
   let workspace: { id: string; name: string };

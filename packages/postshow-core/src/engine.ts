@@ -174,6 +174,10 @@ async function callOpenAiCompatible(
         { role: 'system', content: call.system },
         { role: 'user', content: call.prompt },
       ],
+      // Local and self-hosted models default to creative-writing sampling;
+      // low temperature markedly improves their JSON discipline. Curated
+      // cloud providers keep their defaults (several reject the parameter).
+      ...(provider === 'ollama' || provider === 'compatible' ? { temperature: 0.2 } : {}),
       ...reasoningParams(provider, model, effort),
     }),
   });
@@ -204,21 +208,72 @@ export async function callModel(
   const baseUrl = engine.baseUrl || provider.baseUrl;
   if (!baseUrl) throw new Error('this engine needs a base URL; set one in Settings');
 
-  if (provider.wire === 'anthropic') {
-    return callAnthropic(baseUrl, apiKey, engine.model, engine.effort, call, maxTokens);
+  try {
+    if (provider.wire === 'anthropic') {
+      return await callAnthropic(baseUrl, apiKey, engine.model, engine.effort, call, maxTokens);
+    }
+    return await callOpenAiCompatible(
+      engine.provider,
+      baseUrl,
+      apiKey,
+      engine.model,
+      engine.effort,
+      call,
+      maxTokens
+    );
+  } catch (error) {
+    // A bare network failure ("fetch failed") tells the user nothing; name
+    // the provider and endpoint so a dead ollama or a typoed base URL is
+    // diagnosable from the run log alone.
+    if (error instanceof TypeError) {
+      const cause =
+        error.cause instanceof Error && error.cause.message ? `: ${error.cause.message}` : '';
+      throw new Error(
+        `could not reach ${provider.label} (${engine.model}) at ${baseUrl}${cause || `: ${error.message}`}`
+      );
+    }
+    throw error;
   }
-  return callOpenAiCompatible(
-    engine.provider,
-    baseUrl,
-    apiKey,
-    engine.model,
-    engine.effort,
-    call,
-    maxTokens
-  );
 }
 
-/** Extracts the first JSON object from model text, tolerating fences. */
+/** Removes the JSON defects small local models emit most: trailing commas
+ * before a closing brace/bracket, and raw newlines inside string literals.
+ * Operates outside strings only, so legitimate content is never touched. */
+function repairJson(raw: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    if (inString) {
+      if (ch === '\\') {
+        out += ch + (raw[i + 1] ?? '');
+        i++;
+        continue;
+      }
+      if (ch === '\n' || ch === '\r') {
+        out += '\\n';
+        continue;
+      }
+      if (ch === '"') inString = false;
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ',') {
+      const rest = raw.slice(i + 1).match(/^\s*([}\]])/);
+      if (rest) continue; // trailing comma: drop it
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/** Extracts the first JSON object from model text, tolerating fences and the
+ * common near-JSON defects of small local models. */
 export function parseModelJson<T>(text: string): T {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = fenced?.[1] ?? text;
@@ -227,5 +282,15 @@ export function parseModelJson<T>(text: string): T {
   if (start === -1 || end === -1 || end <= start) {
     throw new Error('model returned no JSON object');
   }
-  return JSON.parse(candidate.slice(start, end + 1)) as T;
+  const slice = candidate.slice(start, end + 1);
+  try {
+    return JSON.parse(slice) as T;
+  } catch (error) {
+    try {
+      return JSON.parse(repairJson(slice)) as T;
+    } catch {
+      const message = error instanceof Error ? error.message : 'invalid JSON';
+      throw new Error(`model returned invalid JSON (${message}): ${slice.slice(0, 160)}`);
+    }
+  }
 }

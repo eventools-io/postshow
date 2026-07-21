@@ -20,6 +20,9 @@ export async function gateway<T = Record<string, unknown>>(
   if (!config.token) {
     throw new GatewayError('no access token; run `postshow init` first', 401);
   }
+  if (!config.apiUrl) {
+    throw new GatewayError('no API URL configured; run `postshow init` first', 400);
+  }
   const response = await fetch(`${config.apiUrl.replace(/\/$/, '')}/functions/v1/postshow-api`, {
     method: 'POST',
     headers: {

@@ -40,7 +40,14 @@ export function SignInPage() {
         track('signin');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
+      // Gateway-level failures surface as errors whose message is empty or
+      // raw JSON; show something a person can act on instead.
+      const message = e instanceof Error ? e.message.trim() : '';
+      setError(
+        message && !message.startsWith('{')
+          ? message
+          : 'Could not reach the sign-in service. Try again in a moment.'
+      );
     } finally {
       setBusy(false);
     }
@@ -61,7 +68,9 @@ export function SignInPage() {
             {mode === 'signin' ? 'Sign in' : 'Create your account'}
           </h1>
           <p className="m-0 mt-1 font-public-sans text-[13px] leading-[1.5] text-shell-fg-2">
-            One account across eventools and Postshow. Existing eventools logins work here.
+            {mode === 'signin'
+              ? 'Your workspace, its accounts, and the night log live behind this door.'
+              : 'A workspace takes about a minute to set up.'}
           </p>
           <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-3">
             <label className="flex flex-col gap-1">
