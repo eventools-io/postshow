@@ -1,8 +1,16 @@
 {
   "name": "postshow",
   "version": "0.1.0",
+  "author": "Eventools LLC",
   "license": "MIT",
   "description": "The Postshow CLI: setup wizard, local agent runtime, inbox review, and MCP server for the customer-intelligence teammate at postshow.io.",
+  "keywords": [
+    "postshow",
+    "customer-intelligence",
+    "product-analytics",
+    "cli",
+    "mcp"
+  ],
   "type": "module",
   "bin": {
     "postshow": "./dist/index.js"
@@ -14,17 +22,20 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepack": "pnpm build",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@eventools/postshow-core": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@napi-rs/keyring": "1.3.0",
+    "postgres": "^3.4.9",
     "undici": "^7.28.0",
     "zod": "^3.25.28"
   },
   "devDependencies": {
     "@eventools/config": "workspace:*",
+    "@eventools/postshow-core": "workspace:*",
     "@types/node": "^22.10.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
@@ -32,13 +43,24 @@
   },
   "exports": {
     "./lib": {
-      "types": "./src/lib.ts",
+      "types": "./dist/lib.d.ts",
       "import": "./dist/lib.js"
     }
   },
+  "engines": {
+    "node": ">=20"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/eventools-io/postshow.git"
+    "url": "https://github.com/eventools-io/postshow.git",
+    "directory": "packages/postshow-cli"
   },
-  "homepage": "https://postshow.io"
+  "homepage": "https://postshow.io",
+  "bugs": {
+    "url": "https://github.com/eventools-io/postshow/issues",
+    "email": "support@eventools.io"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

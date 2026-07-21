@@ -22,30 +22,50 @@ const ROUTES = [
     path: '/security',
     title: 'Security and data flow · Postshow',
     description:
-      'Where your customer data goes and where it never goes: write-only keys, local-only connectors, read-only gathering, and the full Postshow data-flow map.',
+      'How Postshow handles customer data: write-only keys, local-only connector boundaries, selected model providers, retention, and deletion.',
   },
   {
     path: '/open-source',
     title: 'Open source · Postshow',
     description:
-      'Postshow is open core: the app, CLI, MCP server, desktop agent, and engine are MIT; the always-on cloud is the business. Self-host it, or let us run it.',
+      'Postshow is open core: the app, CLI, MCP server, desktop agent, and engine are MIT; the supported always-on cloud runtime is the business.',
+  },
+  {
+    path: '/terms',
+    title: 'Terms of Service · Postshow',
+    description:
+      'The terms for Postshow accounts, hosted service, AI output, connected sources, billing, export, and deletion.',
+  },
+  {
+    path: '/privacy',
+    title: 'Privacy Policy · Postshow',
+    description:
+      'How Eventools LLC collects, processes, shares, retains, exports, and deletes information when you use Postshow.',
+  },
+  {
+    path: '/cookies',
+    title: 'Cookies and local storage · Postshow',
+    description:
+      'The essential browser storage Postshow uses and how optional, consent-based PostHog analytics work.',
   },
 ];
 
 function swapHead(html, route) {
   const url = `${SITE}${route.path}`;
-  return html
-    .replace(/<title>[^<]*<\/title>/, `<title>${route.title}</title>`)
-    .replace(
-      /(<meta\s+name="description"\s+content=")[^"]*(")/,
-      `$1${route.description}$2`
-    )
-    .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${url}$2`)
-    .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${route.title}$2`)
-    .replace(/(<meta\s+property="og:description"\s+content=")[^"]*(")/, `$1${route.description}$2`)
-    .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${url}$2`)
-    // Route-specific pages should not carry the landing page's FAQ schema.
-    .replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\s*/g, '');
+  return (
+    html
+      .replace(/<title>[^<]*<\/title>/, `<title>${route.title}</title>`)
+      .replace(/(<meta\s+name="description"\s+content=")[^"]*(")/, `$1${route.description}$2`)
+      .replace(/(<link rel="canonical" href=")[^"]*(")/, `$1${url}$2`)
+      .replace(/(<meta property="og:title" content=")[^"]*(")/, `$1${route.title}$2`)
+      .replace(
+        /(<meta\s+property="og:description"\s+content=")[^"]*(")/,
+        `$1${route.description}$2`
+      )
+      .replace(/(<meta property="og:url" content=")[^"]*(")/, `$1${url}$2`)
+      // Route-specific pages should not carry the landing page's FAQ schema.
+      .replace(/<script type="application\/ld\+json">[\s\S]*?<\/script>\s*/g, '')
+  );
 }
 
 function main() {

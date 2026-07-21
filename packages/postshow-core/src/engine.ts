@@ -5,7 +5,8 @@
 // DeepSeek, xAI, Mistral, Ollama, and custom compatible endpoints all speak.
 // Every call returns token usage so the caller can meter it.
 
-import { type EffortLevel, getProvider } from './catalog';
+import { type CatalogProvider, type EffortLevel, getProvider, isHostedModel } from './catalog';
+import { isLoopbackHostname, isUnsafePublicHostname } from './network';
 import type { ResolvedEngine } from './tasks';
 
 export interface ModelCall {
@@ -68,16 +69,10 @@ export function reasoningParams(
       return { reasoning_effort: effortMap[effort] };
     }
     case 'zhipu': {
-      // GLM takes thinking {type} plus the full reasoning_effort ladder.
+      // Current Z.AI Chat Completions exposes thinking.type, not a portable
+      // reasoning_effort field.
       if (effort === 'minimal') return { thinking: { type: 'disabled' } };
-      const effortMap: Record<EffortLevel, string> = {
-        minimal: 'minimal',
-        low: 'low',
-        medium: 'medium',
-        high: 'high',
-        max: 'max',
-      };
-      return { thinking: { type: 'enabled' }, reasoning_effort: effortMap[effort] };
+      return { thinking: { type: 'enabled' } };
     }
     case 'deepseek': {
       // V4 takes thinking enabled/disabled plus reasoning_effort high|max.
@@ -98,8 +93,9 @@ export function reasoningParams(
       return { reasoning_effort: effortMap[effort] };
     }
     case 'mistral': {
-      // Small/Medium take reasoning_effort none|high.
-      return { reasoning_effort: effort === 'minimal' || effort === 'low' ? 'none' : 'high' };
+      // Mistral enables reasoning through prompt_mode. Omit it for the low
+      // ladder instead of sending OpenAI's unrelated reasoning_effort field.
+      return effort === 'minimal' || effort === 'low' ? {} : { prompt_mode: 'reasoning' };
     }
     default:
       // ollama, compatible: no portable reasoning control.
@@ -108,12 +104,126 @@ export function reasoningParams(
 }
 
 function trimBase(url: string): string {
-  return url.replace(/\/$/, '');
+  return url.replace(/\/+$/, '');
 }
 
-async function readError(response: Response): Promise<string> {
-  const body = await response.text().catch(() => '');
-  return `model call failed (${response.status}): ${body.slice(0, 300)}`;
+export const MODEL_TIMEOUT_MS = 90_000;
+export const LOCAL_MODEL_TIMEOUT_MS = 10 * 60_000;
+const MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024;
+
+/** Resolve the only endpoint a model call may use. Curated providers are
+ * pinned to the catalog. Local mode is loopback-only. A custom compatible
+ * endpoint may be remote only for BYOK and must use public HTTPS; the cloud
+ * runtime additionally performs DNS revalidation before it permits one. */
+export function resolveEngineEndpoint(engine: ResolvedEngine, provider: CatalogProvider): string {
+  if (engine.mode === 'local' && provider.id !== 'compatible' && provider.id !== 'ollama') {
+    throw new Error('local mode only permits Ollama or a loopback-compatible endpoint');
+  }
+  if (engine.mode === 'hosted' && (!provider.hosted || !isHostedModel(provider.id, engine.model))) {
+    throw new Error('this provider/model is not enabled for hosted processing');
+  }
+  if (provider.id !== 'compatible' && provider.id !== 'ollama') return provider.baseUrl;
+  if (engine.mode === 'hosted') throw new Error('hosted mode does not permit custom endpoints');
+  if (provider.id === 'ollama' && engine.mode !== 'local') {
+    throw new Error('Ollama is available only in local mode');
+  }
+
+  const raw = engine.baseUrl || provider.baseUrl;
+  if (!raw) throw new Error('this engine needs a base URL; set one in Settings');
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('engine base URL is invalid');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('engine base URL cannot contain credentials, query parameters, or a fragment');
+  }
+  const loopback = isLoopbackHostname(url.hostname);
+  if (engine.mode === 'local') {
+    if (!loopback || !['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('local mode only permits a loopback HTTP(S) model endpoint');
+    }
+  } else if (
+    url.protocol !== 'https:' ||
+    url.port !== '' ||
+    loopback ||
+    isUnsafePublicHostname(url.hostname)
+  ) {
+    throw new Error('remote compatible endpoints must use standard-port public HTTPS');
+  }
+  return trimBase(url.toString());
+}
+
+async function readTextBounded(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_MODEL_RESPONSE_BYTES) {
+    throw new Error('model response exceeded the 4 MiB safety limit');
+  }
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_MODEL_RESPONSE_BYTES) {
+        void reader.cancel().catch(() => {});
+        throw new Error('model response exceeded the 4 MiB safety limit');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+async function fetchModelJson(
+  url: string,
+  init: RequestInit,
+  timeoutMs = MODEL_TIMEOUT_MS
+): Promise<Record<string, unknown>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
+    if (response.status >= 300 && response.status < 400) {
+      throw new Error('model endpoint redirects are not allowed');
+    }
+    const text = await readTextBounded(response);
+    if (!response.ok) {
+      // Do not surface provider-controlled headers or bodies: compatible
+      // endpoints and proxies can reflect credentials into either one.
+      throw new Error(`model call failed (${response.status})`);
+    }
+    try {
+      return jsonRecord(JSON.parse(text));
+    } catch {
+      throw new Error('model returned invalid JSON');
+    }
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('model call timed out');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function callAnthropic(
@@ -124,7 +234,7 @@ async function callAnthropic(
   call: ModelCall,
   maxTokens: number
 ): Promise<ModelResult> {
-  const response = await fetch(`${trimBase(baseUrl || 'https://api.anthropic.com')}/v1/messages`, {
+  const data = await fetchModelJson(`${trimBase(baseUrl)}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -139,17 +249,73 @@ async function callAnthropic(
       ...reasoningParams('anthropic', model, effort),
     }),
   });
-  if (!response.ok) throw new Error(await readError(response));
-  const data = await response.json();
-  const text = ((data.content ?? []) as { type: string; text?: string }[])
+  if (data.stop_reason === 'refusal') throw new Error('model refused the request');
+  if (data.stop_reason === 'max_tokens') throw new Error('model output was truncated');
+  const text = (Array.isArray(data.content) ? data.content : [])
+    .map(jsonRecord)
     .filter((block) => block.type === 'text')
-    .map((block) => block.text ?? '')
+    .map((block) => (typeof block.text === 'string' ? block.text : ''))
     .join('');
+  const usage = jsonRecord(data.usage);
   return {
     text,
-    inputTokens: Number(data.usage?.input_tokens ?? 0),
-    outputTokens: Number(data.usage?.output_tokens ?? 0),
+    inputTokens: Number(usage.input_tokens ?? 0),
+    outputTokens: Number(usage.output_tokens ?? 0),
   };
+}
+
+export function buildOpenAiRequestBody(
+  provider: string,
+  model: string,
+  effort: EffortLevel,
+  call: ModelCall,
+  maxTokens: number
+): Record<string, unknown> {
+  const supportsJsonMode = !['compatible', 'ollama'].includes(provider);
+  return {
+    model,
+    ...(provider === 'openai' ? { max_completion_tokens: maxTokens } : { max_tokens: maxTokens }),
+    ...(supportsJsonMode ? { response_format: { type: 'json_object' } } : {}),
+    messages: [
+      { role: 'system', content: call.system },
+      { role: 'user', content: call.prompt },
+    ],
+    // Local and custom models often default to creative sampling. A low
+    // temperature materially improves their required JSON discipline.
+    ...(provider === 'ollama' || provider === 'compatible' ? { temperature: 0.2 } : {}),
+    ...reasoningParams(provider, model, effort),
+  };
+}
+
+function messageContentText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (!part || typeof part !== 'object') return '';
+      const row = part as Record<string, unknown>;
+      if (typeof row.text === 'string') return row.text;
+      if (row.text && typeof row.text === 'object') {
+        const nested = row.text as Record<string, unknown>;
+        return typeof nested.value === 'string' ? nested.value : '';
+      }
+      return typeof row.content === 'string' ? row.content : '';
+    })
+    .join('');
+}
+
+export function extractOpenAiText(data: Record<string, unknown>): string {
+  const choice = jsonRecord(Array.isArray(data.choices) ? data.choices[0] : undefined);
+  const message = jsonRecord(choice.message);
+  const finish = String(choice.finish_reason ?? '');
+  if (finish === 'length') throw new Error('model output was truncated');
+  if (finish === 'content_filter' || message.refusal) {
+    throw new Error('model refused the request');
+  }
+  const text = messageContentText(message.content);
+  if (!text.trim()) throw new Error('model returned no text output');
+  return text;
 }
 
 async function callOpenAiCompatible(
@@ -159,121 +325,72 @@ async function callOpenAiCompatible(
   model: string,
   effort: EffortLevel,
   call: ModelCall,
-  maxTokens: number
+  maxTokens: number,
+  timeoutMs: number
 ): Promise<ModelResult> {
-  const response = await fetch(`${trimBase(baseUrl)}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+  const data = await fetchModelJson(
+    `${trimBase(baseUrl)}/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(buildOpenAiRequestBody(provider, model, effort, call, maxTokens)),
     },
-    body: JSON.stringify({
-      model,
-      max_completion_tokens: maxTokens,
-      messages: [
-        { role: 'system', content: call.system },
-        { role: 'user', content: call.prompt },
-      ],
-      // Local and self-hosted models default to creative-writing sampling;
-      // low temperature markedly improves their JSON discipline. Curated
-      // cloud providers keep their defaults (several reject the parameter).
-      ...(provider === 'ollama' || provider === 'compatible' ? { temperature: 0.2 } : {}),
-      ...reasoningParams(provider, model, effort),
-    }),
-  });
-  if (!response.ok) throw new Error(await readError(response));
-  const data = await response.json();
+    timeoutMs
+  );
+  const usage = jsonRecord(data.usage);
   return {
-    text: String(data.choices?.[0]?.message?.content ?? ''),
-    inputTokens: Number(data.usage?.prompt_tokens ?? 0),
-    outputTokens: Number(data.usage?.completion_tokens ?? 0),
+    text: extractOpenAiText(data),
+    inputTokens: Number(usage.prompt_tokens ?? 0),
+    outputTokens: Number(usage.completion_tokens ?? 0),
   };
 }
 
 /** Call the resolved engine. The caller supplies the API key for the resolved
  * provider (workspace key for BYOK, platform key for hosted, empty for
  * ollama). */
-export async function callModel(
+export function callModel(
   engine: ResolvedEngine,
   apiKey: string,
   call: ModelCall
 ): Promise<ModelResult> {
   const provider = getProvider(engine.provider);
   if (!provider) throw new Error(`unknown engine provider: ${engine.provider}`);
-  if (provider.requiresKey && !apiKey) {
+  if (
+    provider.requiresKey &&
+    !apiKey &&
+    !(provider.id === 'compatible' && engine.mode === 'local')
+  ) {
     throw new Error(`no ${provider.label} API key configured; add one in Settings`);
   }
   if (!engine.model) throw new Error('no model configured for this task');
   const maxTokens = call.maxTokens ?? 4000;
-  const baseUrl = engine.baseUrl || provider.baseUrl;
-  if (!baseUrl) throw new Error('this engine needs a base URL; set one in Settings');
+  const baseUrl = resolveEngineEndpoint(engine, provider);
 
-  try {
-    if (provider.wire === 'anthropic') {
-      return await callAnthropic(baseUrl, apiKey, engine.model, engine.effort, call, maxTokens);
-    }
-    return await callOpenAiCompatible(
-      engine.provider,
-      baseUrl,
-      apiKey,
-      engine.model,
-      engine.effort,
-      call,
-      maxTokens
-    );
-  } catch (error) {
-    // A bare network failure ("fetch failed") tells the user nothing; name
-    // the provider and endpoint so a dead ollama or a typoed base URL is
-    // diagnosable from the run log alone.
+  const request =
+    provider.wire === 'anthropic'
+      ? callAnthropic(baseUrl, apiKey, engine.model, engine.effort, call, maxTokens)
+      : callOpenAiCompatible(
+          engine.provider,
+          baseUrl,
+          apiKey,
+          engine.model,
+          engine.effort,
+          call,
+          maxTokens,
+          engine.mode === 'local' ? LOCAL_MODEL_TIMEOUT_MS : MODEL_TIMEOUT_MS
+        );
+  return request.catch((error: unknown) => {
     if (error instanceof TypeError) {
-      const cause =
-        error.cause instanceof Error && error.cause.message ? `: ${error.cause.message}` : '';
-      throw new Error(
-        `could not reach ${provider.label} (${engine.model}) at ${baseUrl}${cause || `: ${error.message}`}`
-      );
+      throw new Error(`could not reach ${provider.label} (${engine.model}) at ${baseUrl}`);
     }
     throw error;
-  }
+  });
 }
 
-/** Removes the JSON defects small local models emit most: trailing commas
- * before a closing brace/bracket, and raw newlines inside string literals.
- * Operates outside strings only, so legitimate content is never touched. */
-function repairJson(raw: string): string {
-  let out = '';
-  let inString = false;
-  for (let i = 0; i < raw.length; i++) {
-    const ch = raw[i]!;
-    if (inString) {
-      if (ch === '\\') {
-        out += ch + (raw[i + 1] ?? '');
-        i++;
-        continue;
-      }
-      if (ch === '\n' || ch === '\r') {
-        out += '\\n';
-        continue;
-      }
-      if (ch === '"') inString = false;
-      out += ch;
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      out += ch;
-      continue;
-    }
-    if (ch === ',') {
-      const rest = raw.slice(i + 1).match(/^\s*([}\]])/);
-      if (rest) continue; // trailing comma: drop it
-    }
-    out += ch;
-  }
-  return out;
-}
-
-/** Extracts the first JSON object from model text, tolerating fences and the
- * common near-JSON defects of small local models. */
+/** Extracts the first JSON object from model text, tolerating fences. */
 export function parseModelJson<T>(text: string): T {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = fenced?.[1] ?? text;
@@ -282,15 +399,5 @@ export function parseModelJson<T>(text: string): T {
   if (start === -1 || end === -1 || end <= start) {
     throw new Error('model returned no JSON object');
   }
-  const slice = candidate.slice(start, end + 1);
-  try {
-    return JSON.parse(slice) as T;
-  } catch (error) {
-    try {
-      return JSON.parse(repairJson(slice)) as T;
-    } catch {
-      const message = error instanceof Error ? error.message : 'invalid JSON';
-      throw new Error(`model returned invalid JSON (${message}): ${slice.slice(0, 160)}`);
-    }
-  }
+  return JSON.parse(candidate.slice(start, end + 1)) as T;
 }

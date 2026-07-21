@@ -1,0 +1,12 @@
+# cj-vana and jratliff79 are current repository administrators. cj-vana is the
+# current source maintainer in repository history.
+* @cj-vana @jratliff79
+
+# Keep security, automation, and release policy under explicit owner review if
+# narrower ownership rules are added later.
+/.github/ @cj-vana @jratliff79
+/SECURITY.md @cj-vana @jratliff79
+/SUPPORT.md @cj-vana @jratliff79
+/CODE_OF_CONDUCT.md @cj-vana @jratliff79
+/package.json @cj-vana @jratliff79
+/pnpm-lock.yaml @cj-vana @jratliff79

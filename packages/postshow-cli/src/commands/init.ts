@@ -3,10 +3,12 @@
 // before saving it, and keep secrets out of any model context entirely (this
 // wizard is deterministic; the only AI in Postshow runs after setup, on
 // gathered data). Local-only connectors keep their credentials in
-// ~/.postshow/config.json and never register a secret with the cloud.
+// the OS credential store and never register a secret with the cloud. The
+// JSON profile contains only opaque credential references.
 
 import {
   CATALOG,
+  callModel,
   getProvider,
   posthogTest,
   resendTest,
@@ -18,21 +20,70 @@ import {
   tierDefault,
   type AdapterResult,
   type EngineProviderId,
+  type ResolvedEngine,
 } from '@eventools/postshow-core';
 import { gateway } from '../api';
 import { loadConfig, saveConfig, configPath, type CliConfig, type LocalConnector } from '../config';
 import { detectConnectors, detectOllama } from '../detect';
-import { ask, choose, confirm, dim, fail, heading, ok, say, warn } from '../ui';
+import { postgresTest } from '../postgres';
+import { ask, askSecret, choose, confirm, dim, fail, heading, ok, say, warn } from '../ui';
 
-interface ConnectorPlan {
+export interface ConnectorPlan {
   provider: string;
   label: string;
   evidence: string;
   fields: { key: string; question: string; secret: boolean; meta?: boolean }[];
   test: (meta: Record<string, unknown>, secret: Record<string, unknown>) => Promise<AdapterResult>;
+  /** The provider cannot ever be registered with a cloud-side credential. */
+  forceLocalOnly?: boolean;
 }
 
-const CONNECTOR_PLANS: ConnectorPlan[] = [
+export interface ConnectorSetupDependencies {
+  ask: typeof ask;
+  askSecret: typeof askSecret;
+  confirm: typeof confirm;
+  dim: typeof dim;
+  fail: typeof fail;
+  gateway: (config: CliConfig, op: string, args: Record<string, unknown>) => Promise<unknown>;
+  heading: typeof heading;
+  ok: typeof ok;
+  say: typeof say;
+  warn: typeof warn;
+  saveConfig: typeof saveConfig;
+}
+
+const connectorSetupDependencies: ConnectorSetupDependencies = {
+  ask,
+  askSecret,
+  confirm,
+  dim,
+  fail,
+  gateway: (config, op, args) => gateway(config, op, args),
+  heading,
+  ok,
+  say,
+  warn,
+  saveConfig,
+};
+
+async function gatewayWithRetry(
+  config: CliConfig,
+  op: string,
+  args: Record<string, unknown>,
+  call: (config: CliConfig, op: string, args: Record<string, unknown>) => Promise<unknown>
+): Promise<unknown> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await call(config, op, args);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
+export const CONNECTOR_PLANS: ConnectorPlan[] = [
   {
     provider: 'posthog',
     label: 'PostHog (sessions + events)',
@@ -52,6 +103,25 @@ const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'api_key', question: 'Stripe restricted key (read-only, rk_...)', secret: true },
     ],
     test: (_meta, secret) => stripeTest(secret),
+  },
+  {
+    provider: 'postgres',
+    label: 'Postgres (your explicit read-only query)',
+    evidence: '',
+    fields: [
+      {
+        key: 'connection_string',
+        question: 'Postgres connection string (use a read-only database user)',
+        secret: true,
+      },
+      {
+        key: 'query',
+        question: 'One read-only SELECT query for Postshow',
+        secret: true,
+      },
+    ],
+    test: (_meta, secret) => postgresTest(secret),
+    forceLocalOnly: true,
   },
   {
     provider: 'sentry',
@@ -79,7 +149,7 @@ const CONNECTOR_PLANS: ConnectorPlan[] = [
     label: 'Linear (tickets)',
     evidence: '',
     fields: [
-      { key: 'team_key', question: 'Linear team key (optional)', secret: false, meta: true },
+      { key: 'team_key', question: 'Linear team key', secret: false, meta: true },
       { key: 'api_key', question: 'Linear API key', secret: true },
     ],
     test: (_meta, secret) => linearTest(secret),
@@ -92,7 +162,7 @@ const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'from', question: 'From address (e.g. cj@yourdomain.com)', secret: false, meta: true },
       { key: 'api_key', question: 'Resend API key', secret: true },
     ],
-    test: (_meta, secret) => resendTest(secret),
+    test: (meta, secret) => resendTest(meta, secret),
   },
   {
     provider: 'slack',
@@ -103,23 +173,25 @@ const CONNECTOR_PLANS: ConnectorPlan[] = [
   },
 ];
 
-async function setupConnector(
+export async function setupConnector(
   config: CliConfig,
   plan: ConnectorPlan,
-  evidence: string
+  evidence: string,
+  dependencies: ConnectorSetupDependencies = connectorSetupDependencies
 ): Promise<void> {
-  heading(plan.label);
-  if (evidence) dim(`detected via ${evidence}`);
+  dependencies.heading(plan.label);
+  if (evidence) dependencies.dim(`detected via ${evidence}`);
 
   const meta: Record<string, unknown> = {};
   const secret: Record<string, unknown> = {};
   for (const field of plan.fields) {
     const fallback = field.key === 'host' ? 'https://us.posthog.com' : '';
-    const value = await ask(field.question, fallback);
+    const value = field.secret
+      ? await dependencies.askSecret(field.question)
+      : await dependencies.ask(field.question, fallback);
     if (!value) {
       if (field.secret) {
-        warn(`skipping ${plan.provider}: no credential entered`);
-        return;
+        throw new Error(`${plan.provider} credential is required`);
       }
       continue;
     }
@@ -127,102 +199,305 @@ async function setupConnector(
     else secret[field.key] = value;
   }
 
-  say('testing…');
+  dependencies.say('testing…');
   try {
     const result = await plan.test(meta, secret);
-    ok(result.detail);
+    if (!result.ok) throw new Error(result.detail || 'connection test failed');
+    dependencies.ok(result.detail);
   } catch (error) {
-    fail(error instanceof Error ? error.message : 'connection test failed');
-    if (!(await confirm('Save it anyway?', false))) return;
+    dependencies.fail(error instanceof Error ? error.message : 'connection test failed');
+    throw new Error(`${plan.provider} credential verification failed`);
   }
 
-  const localOnly = await confirm(
-    'Keep this connector local-only? (credentials stay on this machine; only derived findings sync)',
-    false
-  );
+  const localOnly = plan.forceLocalOnly
+    ? true
+    : await dependencies.confirm(
+        'Keep this connector local-only? (credentials stay here; source data goes only to your selected model; only findings sync)',
+        false
+      );
+  if (plan.forceLocalOnly) {
+    dependencies.dim('local-only: connection string and query stay in the OS credential store');
+  }
 
   const connector: LocalConnector = {
     provider: plan.provider,
     label: '',
     localOnly,
+    verified: true,
     meta,
     secret,
   };
   config.connectors = [...config.connectors.filter((c) => c.provider !== plan.provider), connector];
 
-  await gateway(config, 'connections.upsert', {
-    provider: plan.provider,
-    local_only: localOnly,
-    meta,
-    secret: localOnly ? null : secret,
-    verified: true,
-  });
-  ok(localOnly ? 'registered (credentials stay local)' : 'connected to the workspace');
+  // Commit the already-verified credential to the native store before any
+  // remote mutation. If this fails, the cloud stays untouched. If a later
+  // network call fails, the next setup attempt can recover from local state.
+  dependencies.saveConfig(config);
+
+  const upsert = (await gatewayWithRetry(
+    config,
+    'connections.upsert',
+    {
+      provider: plan.provider,
+      local_only: localOnly,
+      meta,
+      secret: localOnly ? null : secret,
+      verified: true,
+    },
+    dependencies.gateway
+  )) as { connection_id?: unknown };
+  const connectionId = String(upsert.connection_id ?? '');
+  if (!connectionId) throw new Error(`${plan.provider} registration returned no connection id`);
+
+  if (!localOnly) {
+    if (plan.provider === 'slack') {
+      dependencies.warn('cloud verification sends one additional Slack test message');
+    }
+    const verifyArgs = {
+      connection_id: connectionId,
+      ...(plan.provider === 'slack' ? { send_test_message: true } : {}),
+    };
+    try {
+      await dependencies.gateway(config, 'connections.verify', verifyArgs);
+    } catch (firstError) {
+      // The verification may have committed before the response was lost.
+      // Read back before any retry so Slack never receives a duplicate test.
+      const afterError = (await gatewayWithRetry(
+        config,
+        'connections.list',
+        {},
+        dependencies.gateway
+      )) as {
+        connections?: { provider?: unknown; status?: unknown; local_only?: unknown }[];
+      };
+      const committed = afterError.connections?.find((entry) => entry.provider === plan.provider);
+      if (committed?.status !== 'connected' || committed.local_only !== false) {
+        if (plan.provider === 'slack') throw firstError;
+        await dependencies.gateway(config, 'connections.verify', verifyArgs);
+      }
+    }
+  }
+
+  const readback = (await gatewayWithRetry(
+    config,
+    'connections.list',
+    {},
+    dependencies.gateway
+  )) as {
+    connections?: { provider?: unknown; status?: unknown; local_only?: unknown }[];
+  };
+  const saved = readback.connections?.find((entry) => entry.provider === plan.provider);
+  if (!saved || saved.status !== 'connected' || saved.local_only !== localOnly) {
+    throw new Error(`${plan.provider} did not read back as connected`);
+  }
+
+  dependencies.ok(localOnly ? 'registered (credentials stay local)' : 'connected to the workspace');
 }
 
-async function setupEngine(config: CliConfig): Promise<void> {
-  heading('Engine');
-  say('Postshow runs on the model you choose, per task: a fast tier watches');
-  say('sessions, a frontier tier runs deep dives. Pick where the models run.');
+export interface EngineSetupDependencies {
+  ask: typeof ask;
+  askSecret: typeof askSecret;
+  callModel: typeof callModel;
+  choose: typeof choose;
+  confirm: typeof confirm;
+  detectOllama: typeof detectOllama;
+  dim: typeof dim;
+  gateway: (config: CliConfig, op: string, args: Record<string, unknown>) => Promise<unknown>;
+  heading: typeof heading;
+  ok: typeof ok;
+  saveConfig: typeof saveConfig;
+  say: typeof say;
+}
 
-  const ollamaModels = await detectOllama();
+const engineSetupDependencies: EngineSetupDependencies = {
+  ask,
+  askSecret,
+  callModel,
+  choose,
+  confirm,
+  detectOllama,
+  dim,
+  gateway: (config, op, args) => gateway(config, op, args),
+  heading,
+  ok,
+  saveConfig,
+  say,
+};
+
+async function probeEngine(
+  engine: ResolvedEngine,
+  key: string,
+  dependencies: EngineSetupDependencies
+): Promise<void> {
+  const result = await dependencies.callModel(engine, key, {
+    system: 'This is a credential and model availability check.',
+    prompt: 'Reply with a short acknowledgement.',
+    maxTokens: 16,
+  });
+  if (!result.text.trim()) throw new Error('engine returned an empty response');
+}
+
+export async function setupEngine(
+  config: CliConfig,
+  dependencies: EngineSetupDependencies = engineSetupDependencies
+): Promise<void> {
+  dependencies.heading('Engine');
+  dependencies.say('Postshow runs on the model you choose, per task: a fast tier watches');
+  dependencies.say('sessions, a frontier tier runs deep dives. Pick where the models run.');
+
+  const ollamaModels = await dependencies.detectOllama();
   const options = ollamaModels.length ? ['byok', 'local', 'hosted'] : ['byok', 'hosted'];
   if (ollamaModels.length) {
-    dim(
+    dependencies.dim(
       `ollama detected with ${ollamaModels.length} model(s): ${ollamaModels.slice(0, 4).join(', ')}`
     );
   }
-  const mode = (await choose('Engine mode', options, 'byok')) as 'byok' | 'local' | 'hosted';
+  const mode = (await dependencies.choose('Engine mode', options, 'byok')) as
+    | 'byok'
+    | 'local'
+    | 'hosted';
 
   if (mode === 'hosted') {
-    say('Hosted models come with the Solo and Team plans; manage them in the web app.');
+    dependencies.say(
+      'Hosted models come with the Solo and Team plans; manage them in the web app.'
+    );
     config.engine = { mode: 'hosted', provider: 'anthropic', model: '', base_url: '' };
-    await gateway(config, 'engine.set', { mode: 'hosted', provider: 'anthropic' });
+    dependencies.saveConfig(config);
+    await gatewayWithRetry(
+      config,
+      'engine.set',
+      { mode: 'hosted', provider: 'anthropic' },
+      dependencies.gateway
+    );
+    const readback = (await gatewayWithRetry(config, 'engine.get', {}, dependencies.gateway)) as {
+      defaults?: { mode?: unknown; provider?: unknown } | null;
+    };
+    if (readback.defaults?.mode !== 'hosted' || readback.defaults.provider !== 'anthropic') {
+      throw new Error('hosted engine did not read back from the workspace');
+    }
     return;
   }
 
   if (mode === 'local') {
-    const model = await ask('Ollama model', ollamaModels[0] ?? 'llama3.3');
+    const model = await dependencies.ask('Ollama model', ollamaModels[0] ?? 'llama3.3');
+    if (!model) throw new Error('a local model is required');
+    await probeEngine(
+      {
+        mode: 'local',
+        provider: 'ollama',
+        model,
+        taskClass: 'narration',
+        effort: 'minimal',
+        baseUrl: 'http://localhost:11434/v1',
+      },
+      '',
+      dependencies
+    );
     config.engine = {
       mode: 'local',
       provider: 'ollama',
       model,
       base_url: 'http://localhost:11434/v1',
     };
-    await gateway(config, 'engine.set', {
-      mode: 'local',
-      provider: 'ollama',
-      model,
-      base_url: 'http://localhost:11434/v1',
-    });
-    ok(`local engine set: ollama/${model}`);
+    dependencies.saveConfig(config);
+    await gatewayWithRetry(
+      config,
+      'engine.set',
+      {
+        mode: 'local',
+        provider: 'ollama',
+        model,
+        base_url: 'http://localhost:11434/v1',
+      },
+      dependencies.gateway
+    );
+    const readback = (await gatewayWithRetry(config, 'engine.get', {}, dependencies.gateway)) as {
+      defaults?: { mode?: unknown; provider?: unknown; model?: unknown } | null;
+    };
+    if (
+      readback.defaults?.mode !== 'local' ||
+      readback.defaults.provider !== 'ollama' ||
+      readback.defaults.model !== model
+    ) {
+      throw new Error('local engine did not read back from the workspace');
+    }
+    dependencies.ok(`local engine set: ollama/${model}`);
     return;
   }
 
   const providerIds = CATALOG.filter((p) => p.requiresKey && p.models.length > 0).map((p) => p.id);
-  const providerId = (await choose('Provider', providerIds, 'anthropic')) as EngineProviderId;
+  const providerId = (await dependencies.choose(
+    'Provider',
+    providerIds,
+    'anthropic'
+  )) as EngineProviderId;
   const provider = getProvider(providerId);
   const suggested = tierDefault(providerId, 'standard')?.id ?? '';
-  say(`models: ${provider?.models.map((m) => m.id).join(', ')}`);
-  const model = await ask('Default model (per-task defaults fill the rest)', suggested);
-  const key = await ask(`${provider?.label} API key`);
-  if (!key) {
-    warn('no key entered; the agent will gather data but skip narration until one is added');
-  }
+  dependencies.say(`models: ${provider?.models.map((m) => m.id).join(', ')}`);
+  const model = await dependencies.ask(
+    'Default model (per-task defaults fill the rest)',
+    suggested
+  );
+  const key = await dependencies.askSecret(`${provider?.label} API key`);
+  if (!model) throw new Error('a model is required');
+  if (!key) throw new Error(`${provider?.label ?? providerId} API key is required`);
+  await probeEngine(
+    {
+      mode: 'byok',
+      provider: providerId,
+      model,
+      taskClass: 'narration',
+      effort: 'minimal',
+      baseUrl: '',
+    },
+    key,
+    dependencies
+  );
 
   config.engine = { mode: 'byok', provider: providerId, model, base_url: '' };
-  if (key) config.keys[providerId] = key;
+  config.keys[providerId] = key;
 
-  const syncKey = key
-    ? await confirm('Also store this key in your workspace so cloud runs can use it?', true)
-    : false;
-  await gateway(config, 'engine.set', {
-    mode: 'byok',
-    provider: providerId,
-    model,
-    api_key: syncKey ? key : undefined,
-  });
-  ok(
+  const syncKey = await dependencies.confirm(
+    'Also store this key in your workspace so cloud runs can use it?',
+    true
+  );
+  dependencies.saveConfig(config);
+  await gatewayWithRetry(
+    config,
+    'engine.set',
+    {
+      mode: 'byok',
+      provider: providerId,
+      model,
+      api_key: syncKey ? key : undefined,
+    },
+    dependencies.gateway
+  );
+  if (!syncKey) {
+    // “Local-only” is an exact state, not merely a promise not to upload the
+    // new value. Remove any older workspace copy for this provider as well.
+    await gatewayWithRetry(
+      config,
+      'engine.set_key',
+      { provider: providerId, key: '' },
+      dependencies.gateway
+    );
+  }
+  const readback = (await gatewayWithRetry(config, 'engine.get', {}, dependencies.gateway)) as {
+    defaults?: { mode?: unknown; provider?: unknown; model?: unknown } | null;
+    key_providers?: unknown;
+  };
+  if (
+    readback.defaults?.mode !== 'byok' ||
+    readback.defaults.provider !== providerId ||
+    readback.defaults.model !== model ||
+    !Array.isArray(readback.key_providers) ||
+    (syncKey && !readback.key_providers.includes(providerId)) ||
+    (!syncKey && readback.key_providers.includes(providerId))
+  ) {
+    throw new Error('BYOK engine did not read back from the workspace');
+  }
+  dependencies.ok(
     `engine set: byok/${providerId}${model ? `/${model}` : ''}${syncKey ? ' (key synced)' : ' (key local-only)'}`
   );
 }
@@ -240,7 +515,7 @@ export async function runInit(): Promise<number> {
     dim('token already configured');
   } else {
     say('Create one in the web app: Settings → Access tokens → Create token.');
-    const token = await ask('Paste your token (psh_...)');
+    const token = await askSecret('Paste your token (psh_...)');
     if (!token.startsWith('psh_')) {
       fail('that does not look like a Postshow token');
       return 1;
@@ -269,6 +544,14 @@ export async function runInit(): Promise<number> {
   config.workspaceId = workspace.id;
   config.workspaceName = workspace.name;
   ok(`workspace: ${workspace.name}`);
+  try {
+    // Persist the verified access token/workspace before later setup stages so
+    // connector or engine failures are resumable without re-entering it.
+    saveConfig(config);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'could not save the local profile');
+    return 1;
+  }
 
   heading('Connectors');
   const detected = detectConnectors(process.cwd());
@@ -279,12 +562,19 @@ export async function runInit(): Promise<number> {
     dim('nothing auto-detected in this directory; you can still add connectors');
   }
 
-  const existing = await gateway<{ connections: { provider: string; status: string }[] }>(
-    config,
-    'connections.list'
-  );
+  const existing = await gateway<{
+    connections: { provider: string; status: string; local_only: boolean }[];
+  }>(config, 'connections.list');
   const alreadyConnected = new Set(
-    existing.connections.filter((c) => c.status === 'connected').map((c) => c.provider)
+    existing.connections
+      .filter((connection) => {
+        if (connection.status !== 'connected') return false;
+        if (!connection.local_only) return true;
+        return config.connectors.some(
+          (local) => local.provider === connection.provider && local.localOnly && local.verified
+        );
+      })
+      .map((connection) => connection.provider)
   );
 
   for (const plan of CONNECTOR_PLANS) {
@@ -298,12 +588,27 @@ export async function runInit(): Promise<number> {
       Boolean(hit) || plan.provider === 'posthog'
     );
     if (!wanted) continue;
-    await setupConnector(config, plan, hit?.evidence ?? '');
+    try {
+      await setupConnector(config, plan, hit?.evidence ?? '');
+    } catch (error) {
+      fail(error instanceof Error ? error.message : `${plan.provider} setup failed`);
+      return 1;
+    }
   }
 
-  await setupEngine(config);
+  try {
+    await setupEngine(config);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'engine setup failed');
+    return 1;
+  }
 
-  saveConfig(config);
+  try {
+    saveConfig(config);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : 'could not save the local profile');
+    return 1;
+  }
   heading('Done');
   ok(`profile saved to ${configPath()}`);
   say('');

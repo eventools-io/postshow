@@ -8,10 +8,12 @@
 //   deep dive (Opus 4.8, ~25K in / ~8K out) ................ ~$0.33 a run
 //     (Fable 5 worst case ~$0.65 a run)
 //
-// Solo at $99 with 3,000 sessions + 20 deep dives lands near $15/mo of model
-// cost fully used (~85% gross margin); Team at $249 with 12,000 sessions +
-// 60 deep dives lands near $45/mo (~82%). Both clear the 3-4x markup target
-// with headroom for retries and frontier-model overrides.
+// Using those profiles plus the investigation quotas and a 5% retry reserve,
+// fully used model cost is about $19/mo for Solo and $63/mo for Team. That is
+// roughly 81% and 75% model gross margin respectively. A catalog-derived test
+// below this module's consumers guards the >=3x price/cost floor; Fable is
+// BYOK-only so its mandatory-retention/high-cost profile cannot erode hosted
+// economics or contradict the hosted data contract.
 
 export type PlanId = 'free' | 'solo' | 'team' | 'enterprise';
 
@@ -61,7 +63,7 @@ export const PLANS: Record<PlanId, Plan> = {
     seats: 1,
     quota: { sessionsWatched: 0, deepDives: 0, investigations: 0 },
     blurb:
-      'The full product with your own keys or local models. Desktop, CLI, MCP, workspace sync, and on-demand runs. Free forever.',
+      'Use your own keys or local models with desktop, CLI, MCP, workspace sync, and on-demand runs.',
   },
   solo: {
     id: 'solo',
@@ -92,7 +94,7 @@ export const PLANS: Record<PlanId, Plan> = {
     seats: 25,
     quota: { sessionsWatched: 100000, deepDives: 500, investigations: 4000 },
     blurb:
-      'Custom quotas and seats, usage billed on your terms, and priority support for self-hosted or local-only deployment.',
+      'Custom quotas and seats, metered-usage billing, and security and entitlement planning under an order form.',
   },
 };
 

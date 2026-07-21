@@ -2,19 +2,58 @@ appId: io.postshow.desktop
 productName: Postshow
 directories:
   output: dist
+artifactName: '${productName}-${version}-${os}-${arch}.${ext}'
+electronUpdaterCompatibility: '>= 2.16'
+generateUpdatesFilesForAllChannels: false
+publish:
+  provider: github
+  owner: eventools-io
+  repo: postshow
+  channel: latest
 files:
   - out/**
+  - LICENSE
+asarUnpack:
+  - node_modules/@napi-rs/keyring*/**/*
 mac:
+  # The tracked web favicon is the sole Postshow brand-mark source. Builder
+  # deterministically renders the signed ICNS from this vector.
+  icon: ../postshow/public/favicon.svg
+  files:
+    # Platform-specific `files` replaces the global list. Repeat the positive
+    # allowlist here or electron-builder falls back to shipping the workspace.
+    - out/**
+    - LICENSE
+    - '!node_modules/@napi-rs/keyring-win32-*/**/*'
   category: public.app-category.business
+  mergeASARs: true
+  singleArchFiles: '**/*.node'
+  # Both Darwin keyring binaries are intentionally present in each thin app;
+  # the loader selects by process.arch. They are identical across the two
+  # staging apps, so universal must preserve rather than lipo them together.
+  x64ArchFiles: '**/node_modules/@napi-rs/keyring-darwin-*/**/*.node'
   target:
     - target: dmg
       arch: universal
     - target: zip
       arch: universal
   hardenedRuntime: true
-  # Notarization needs Apple credentials in the environment
-  # (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER); packaging without
-  # them produces an unsigned local build.
-  notarize: false
+  # electron-builder notarizes when the complete Apple API-key environment is
+  # present and skips it for local unsigned acceptance builds.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+win:
+  # Use the same tracked source for the embedded executable/installer ICO.
+  icon: ../postshow/public/favicon.svg
+  files:
+    - out/**
+    - LICENSE
+    - '!node_modules/@napi-rs/keyring-darwin-*/**/*'
+  # Release signing is discovered from CSC_LINK / CSC_KEY_PASSWORD. Local
+  # acceptance builds remain unsigned without changing this configuration.
+  target: nsis
+nsis:
+  # One builder invocation emits distinct x64/arm64 installers and one merged
+  # latest.yml containing both signed artifacts. Without this, separate builder
+  # processes overwrite the channel metadata and strand one architecture.
+  buildUniversalInstaller: false

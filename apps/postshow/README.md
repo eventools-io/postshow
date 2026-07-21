@@ -2,7 +2,7 @@
 
 The customer-intelligence teammate, by [eventools](https://eventools.io). Postshow watches your product sessions, reads your revenue and error data, and hands you a queue of ready-to-send actions: outreach drafts, friction tickets, churn-save plays, expansion flags. Its only output is action a human approves.
 
-Live at [postshow.io](https://postshow.io).
+Production home: [postshow.io](https://postshow.io).
 
 ## Open core
 
@@ -15,19 +15,17 @@ MIT licensed (see LICENSE in each package):
 - `packages/postshow-cli` - the `postshow` CLI, setup wizard, local runtime, and MCP server
 - `packages/postshow-core` - the shared engine: model catalog, multi-provider calls, task classes, prompts, connector adapters
 
-Proprietary (this monorepo's `supabase/` tree): the hosted cloud runtime, scheduler, billing, and gateway. The free product is fully usable without them through BYOK keys or local models.
-
-These packages are staged for extraction to a public `eventools-io/postshow` repository; workspace boundaries and licenses are already drawn along that line.
+Proprietary (separate private repository): the hosted cloud runtime, scheduler, billing, and gateway. The free product is usable without hosted models through BYOK keys or local models.
 
 ## Plans
 
-- **Free** - the full product with your own API keys or local models (Ollama). Desktop, CLI, MCP, workspace sync, on-demand runs. We are structurally incapable of a bait-and-switch here: the free tier costs us nothing in model spend, so it never needs to be killed.
-- **Solo ($99/mo)** and **Team ($249/mo)** - the always-on cloud runtime plus hosted models, priced in sessions watched and deep dives, never tokens. Quotas are set so every tier is profitable on its own; over a budget the agent degrades gracefully instead of stopping or surprise-billing.
-- **Enterprise** - volume, SSO, priority support for self-hosted and local-only deployments.
+- **Free** - the current plan uses your own API keys or local models (Ollama) and includes desktop, CLI, MCP, workspace sync, and on-demand runs.
+- **Solo ($99/mo)** and **Team ($249/mo)** - the always-on cloud runtime plus hosted models. Current self-service plans meter sessions watched and deep dives rather than tokens; over an included budget the agent reduces sampling or defers deep dives instead of surprise-billing.
+- **Enterprise** - custom quotas and seats, metered-usage billing, and security and entitlement planning under an order form.
 
-## Self-hosting
+## Running the open components
 
-The honest version: you can, and for most teams the hosted tier is less work than running your own Supabase project plus a scheduler. If you want it anyway, the client surfaces above run against any Supabase project carrying the `postshow_*` migrations, with your own keys. We do not provide support or guarantees for self-hosted deployments; the MIT license is your insurance against vendor risk, not our deployment recommendation.
+This repository contains inspectable clients and the local runtime. It does not contain or package a supported one-command replacement for Postshow's hosted control plane. The MIT components can be used as building blocks for a service you design and operate, but you own its deployment, security, scheduling, billing, upgrades, and compatibility. Eventools does not support or warrant self-managed deployments unless a separate written agreement says otherwise.
 
 ## Develop
 
@@ -37,4 +35,18 @@ pnpm --filter @eventools/postshow test
 pnpm --filter postshow build     # the CLI
 ```
 
-The agent runtime lives in `supabase/functions/postshow-*` with shared logic generated from `packages/postshow-core` (`pnpm gen:postshow-core`).
+The production web build must provide `VITE_POSTSHOW_TURNSTILE_SITE_KEY`; sign-in, sign-up,
+password recovery, and waitlist admission fail closed without it. The waitlist calls
+`VITE_POSTSHOW_WAITLIST_FUNCTION` when set and otherwise uses `postshow-waitlist`. Local Auth
+development can explicitly set `VITE_POSTSHOW_TURNSTILE_BYPASS=true`, but waitlist development
+must use Cloudflare's Turnstile test site key with the matching server-side test secret because the
+admission endpoint requires a real token. The bypass is ignored by production builds.
+
+The authenticated workspace-export client calls
+`VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION` when set and otherwise uses
+`postshow-workspace-export`. It persists only replay-safe request references, streams the private
+NDJSON artifact from an exact-project signed Storage URL, and never buffers the artifact or stores
+the signed URL in the browser.
+
+The managed agent runtime and database migrations live in the separate private cloud repository.
+The open CLI and desktop runtime consume `packages/postshow-core` directly.

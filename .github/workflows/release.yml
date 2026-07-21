@@ -1,50 +1,21 @@
-name: Release
+name: Legacy Release (retired)
 
-# Tag a release (v0.2.0) to publish the CLI to npm and attach desktop builds.
+# This path is intentionally inert. The hardened publisher lives in
+# publish-release.yml under a new workflow identity. Operators must also disable
+# historical workflow ID 316997874 before stable tags are permitted.
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
-  npm:
-    name: Publish CLI to npm
+  retired:
+    name: Historical publisher is disabled
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 1
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          registry-url: https://registry.npmjs.org
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter postshow build
-      - name: Publish
-        if: env.NODE_AUTH_TOKEN != ''
-        working-directory: packages/postshow-cli
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  desktop:
-    name: Desktop (mac universal)
-    runs-on: macos-14
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build and package
-        run: pnpm --filter @eventools/postshow-desktop dist
-      - name: Attach artifacts to the release
-        run: gh release upload "${GITHUB_REF_NAME}" apps/postshow-desktop/dist/*.dmg apps/postshow-desktop/dist/*.zip --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Refuse legacy publication
+        shell: bash
+        run: |
+          echo 'This workflow path is retired and cannot publish. Use Publish Release.' >&2
+          exit 1

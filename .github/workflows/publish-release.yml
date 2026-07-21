@@ -1,0 +1,2710 @@
+name: Publish Release
+
+# An intentional stable vX.Y.Z tag is the sole publication trigger. Build jobs
+# produce and verify artifacts but cannot publish them; one final job promotes
+# the exact validated set to npm and a public GitHub release.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Exact unreleased package version to sign and validate (X.Y.Z)'
+        required: true
+        type: string
+
+concurrency:
+  # Publications share one global queue so an older version cannot race a newer
+  # one. Manual signed-acceptance runs have their own queue and never block the
+  # publication queue (or publish anything). queue:max is supported by GitHub's
+  # current workflow syntax; actionlint 1.7.12's schema has not caught up yet.
+  group: ${{ github.event_name == 'push' && 'postshow-release-publication' || 'postshow-release-dry-run' }}
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Validate source and CLI package
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify stable tag and package version parity
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            tag=""
+            version="${REQUESTED_VERSION}"
+            if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+              echo "Manual signed acceptance must run from main" >&2
+              exit 1
+            fi
+          fi
+          if [[ ! "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release versions must be stable semantic versions (X.Y.Z)" >&2
+            exit 1
+          fi
+          cli_version="$(node -p "require('./packages/postshow-cli/package.json').version")"
+          desktop_version="$(node -p "require('./apps/postshow-desktop/package.json').version")"
+          if [[ "$version" != "$cli_version" ]] || [[ "$version" != "$desktop_version" ]]; then
+            echo "Tag, CLI, and desktop versions must match exactly" >&2
+            echo "tag=$version cli=$cli_version desktop=$desktop_version" >&2
+            exit 1
+          fi
+          if [[ -n "$tag" && "$(git rev-parse HEAD)" != "$(git rev-list -n 1 "$tag")" ]]; then
+            echo "Checked-out commit does not match the release tag" >&2
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "Checkout did not provide the complete origin/main ref" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse refs/remotes/origin/main)" ]]; then
+            echo "Release tags and manual signed acceptance must use the exact current origin/main head" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_RUN_ATTEMPT" != 1 ]]; then
+            npm_state="$RUNNER_TEMP/npm-rerun-state.json"
+            npm_status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              --output "$npm_state" --write-out '%{http_code}' \
+              'https://registry.npmjs.org/postshow')"
+            npm_exact=false
+            case "$npm_status" in
+              200)
+                if jq -e --arg version "$version" '.versions[$version] != null' "$npm_state" >/dev/null; then
+                  npm_exact=true
+                fi
+                ;;
+              404) ;;
+              *)
+                echo "Cannot safely classify npm state for a release rerun: HTTP ${npm_status}" >&2
+                exit 1
+                ;;
+            esac
+
+            github_state="$RUNNER_TEMP/github-rerun-state.json"
+            github_status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              --output "$github_state" --write-out '%{http_code}' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+            github_public=false
+            case "$github_status" in
+              200) github_public=true ;;
+              404) ;;
+              *)
+                echo "Cannot safely classify GitHub state for a release rerun: HTTP ${github_status}" >&2
+                exit 1
+                ;;
+            esac
+            if [[ "$npm_exact" == true || "$github_public" == true ]]; then
+              echo 'Do not rebuild after publication has started. Use Re-run failed jobs on the original run to preserve its signed handoffs.' >&2
+              exit 1
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.20.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+      - name: Full repository validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test
+          pnpm type-check
+          pnpm lint
+          pnpm build
+          pnpm format:check
+          pnpm audit --audit-level low
+          git diff --check
+
+      - name: Inspect and pack the exact CLI tarball
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          (cd packages/postshow-cli && npm pack --dry-run)
+          # Lifecycle scripts write to stdout even with npm's --silent flag. Keep
+          # only npm pack's final filename while pipefail preserves build errors.
+          package_file="$(cd packages/postshow-cli && npm pack --silent | tail -n 1)"
+          expected="postshow-${VERSION}.tgz"
+          if [[ "$package_file" != "$expected" || ! -f "packages/postshow-cli/$expected" ]]; then
+            echo "Unexpected npm package filename: $package_file" >&2
+            exit 1
+          fi
+          mkdir release-cli
+          mv "packages/postshow-cli/$expected" release-cli/
+          tar -tzf "release-cli/$expected" | sort
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cli-package
+          path: release-cli/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+  cli-tarball-acceptance:
+    name: CLI tarball acceptance (Node ${{ matrix.node }})
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-package
+          path: cli-package
+      - name: Install and execute the exact published shape
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="$GITHUB_WORKSPACE/cli-package/postshow-${VERSION}.tgz"
+          test -s "$tarball"
+
+          prefix="$RUNNER_TEMP/postshow-global"
+          npm install --global --prefix "$prefix" --no-audit --no-fund "$tarball"
+          test -x "$prefix/bin/postshow"
+          "$prefix/bin/postshow" --help > "$RUNNER_TEMP/postshow-help.txt"
+          grep -Fx 'postshow - the customer-intelligence teammate (postshow.io)' \
+            "$RUNNER_TEMP/postshow-help.txt"
+
+          consumer="$RUNNER_TEMP/postshow-consumer"
+          mkdir "$consumer"
+          cd "$consumer"
+          npm init --yes >/dev/null
+          npm install --no-audit --no-fund "$tarball"
+          node --input-type=module - <<'NODE'
+          const api = await import('postshow/lib');
+          for (const name of [
+            'loadConfig',
+            'gateway',
+            'runOnce',
+            'runOnceDetailed',
+            'detectOllama',
+            'verifyNativeCredentialStore',
+          ]) {
+            if (typeof api[name] !== 'function') throw new Error(`missing public export ${name}`);
+          }
+          NODE
+
+  cli-native-credential-acceptance:
+    name: CLI native credential roundtrip (${{ matrix.platform }} ${{ matrix.arch }})
+    needs: preflight
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            runner: macos-15
+            arch: arm64
+          - platform: macOS
+            runner: macos-15-intel
+            arch: x64
+          - platform: Windows
+            runner: windows-2025
+            arch: x64
+          - platform: Windows
+            runner: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-package
+          path: cli-package
+      - name: Install the tarball and roundtrip the OS credential backend
+        shell: bash
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="$(pwd)/cli-package/postshow-${VERSION}.tgz"
+          test -s "$tarball"
+          consumer="$(mktemp -d)"
+          cd "$consumer"
+          npm init --yes >/dev/null
+          npm install --no-audit --no-fund "$tarball"
+          node --input-type=module - <<'NODE'
+          import { verifyNativeCredentialStore } from 'postshow/lib';
+          if (process.arch !== process.env.EXPECTED_ARCH) {
+            throw new Error(`runner architecture ${process.arch} is not ${process.env.EXPECTED_ARCH}`);
+          }
+          if (typeof verifyNativeCredentialStore !== 'function') {
+            throw new Error('installed postshow/lib does not export verifyNativeCredentialStore');
+          }
+          verifyNativeCredentialStore();
+          NODE
+
+  release-gate:
+    name: Approve and validate protected release environment
+    needs: [preflight, cli-tarball-acceptance, cli-native-credential-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Require protection rules, tag policy, and every release credential
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_PUBLISHER: ${{ vars.NPM_PUBLISHER }}
+          NPM_PUBLISH_MODE: ${{ vars.NPM_PUBLISH_MODE }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          RELEASE_ADMIN_READER: ${{ vars.RELEASE_ADMIN_READER }}
+          MAIN_RULESET_ID: ${{ vars.MAIN_RULESET_ID }}
+          STABLE_TAG_CREATION_RULESET_ID: ${{ vars.STABLE_TAG_CREATION_RULESET_ID }}
+          STABLE_TAG_IMMUTABILITY_RULESET_ID: ${{ vars.STABLE_TAG_IMMUTABILITY_RULESET_ID }}
+          STABLE_TAG_BYPASS_TEAM_ID: ${{ vars.STABLE_TAG_BYPASS_TEAM_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          WIN_PUBLISHER_DN: ${{ vars.WIN_PUBLISHER_DN }}
+          WIN_SIGNER_SHA1: ${{ vars.WIN_SIGNER_SHA1 }}
+          ENVIRONMENT_NAME: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in RELEASE_ADMIN_READ_TOKEN; do
+            if [[ -z "${!name}" ]]; then missing+=("$name"); fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "Release is blocked: missing required environment secret(s): ${missing[*]}" >&2
+            exit 1
+          fi
+          if [[ -z "$NPM_PUBLISHER" ]]; then
+            echo 'Release is blocked: the protected environment must define NPM_PUBLISHER' >&2
+            exit 1
+          fi
+          if [[ "$NPM_PUBLISH_MODE" != bootstrap && "$NPM_PUBLISH_MODE" != trusted ]]; then
+            echo 'Release is blocked: NPM_PUBLISH_MODE must be bootstrap or trusted' >&2
+            exit 1
+          fi
+          if [[ -z "$RELEASE_ADMIN_READER" ]]; then
+            echo 'Release is blocked: the protected environment must define RELEASE_ADMIN_READER' >&2
+            exit 1
+          fi
+          if [[ ! "$MAIN_RULESET_ID" =~ ^[1-9][0-9]*$ ]] ||
+            [[ ! "$STABLE_TAG_CREATION_RULESET_ID" =~ ^[1-9][0-9]*$ ]] ||
+            [[ ! "$STABLE_TAG_IMMUTABILITY_RULESET_ID" =~ ^[1-9][0-9]*$ ]] ||
+            [[ ! "$STABLE_TAG_BYPASS_TEAM_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'Release is blocked: ruleset IDs and STABLE_TAG_BYPASS_TEAM_ID must be numeric protected-environment variables' >&2
+            exit 1
+          fi
+          if [[ -z "$WIN_PUBLISHER_DN" || "$WIN_PUBLISHER_DN" != *,* || "$WIN_PUBLISHER_DN" != *CN=* ]]; then
+            echo 'Release is blocked: WIN_PUBLISHER_DN must be the signing certificate full distinguished name, not a common name' >&2
+            exit 1
+          fi
+          if [[ ! "$APPLE_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo 'Release is blocked: APPLE_TEAM_ID must be the expected 10-character signing team identifier' >&2
+            exit 1
+          fi
+          normalized_thumbprint="${WIN_SIGNER_SHA1// /}"
+          if [[ ! "$normalized_thumbprint" =~ ^[A-Fa-f0-9]{40}$ ]]; then
+            echo 'Release is blocked: WIN_SIGNER_SHA1 must be the expected SHA-1 certificate thumbprint' >&2
+            exit 1
+          fi
+          authenticated_admin_reader="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api user --jq .login)"
+          if [[ "$authenticated_admin_reader" != "$RELEASE_ADMIN_READER" ]]; then
+            echo "RELEASE_ADMIN_READ_TOKEN authenticates as ${authenticated_admin_reader}, expected ${RELEASE_ADMIN_READER}" >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            expected_repository="https://github.com/${GITHUB_REPOSITORY}.git"
+            package_repository="$(node -p "require('./packages/postshow-cli/package.json').repository.url")"
+            if [[ "$package_repository" != "$expected_repository" ]]; then
+              echo "CLI repository must exactly match the provenance source: ${expected_repository}" >&2
+              exit 1
+            fi
+            if [[ "$(gh repo view "$GITHUB_REPOSITORY" --json visibility --jq .visibility)" != PUBLIC ]]; then
+              echo 'Publication requires a public source repository and updater feed' >&2
+              exit 1
+            fi
+          fi
+
+          api_version='2026-03-10'
+          legacy_workflow="$(gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874")"
+          jq -e '
+            .id == 316997874 and
+            .path == ".github/workflows/release.yml" and
+            .state == "disabled_manually"
+          ' <<<"$legacy_workflow" >/dev/null || {
+            echo 'Historical Release workflow ID 316997874 must be manually disabled before the hardened publisher can run' >&2
+            exit 1
+          }
+          legacy_runs="$(gh api --paginate --slurp \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874/runs?per_page=100")"
+          jq -e 'all(.[]?.workflow_runs[]?; .status == "completed")' <<<"$legacy_runs" >/dev/null || {
+            echo 'Historical Release workflow ID 316997874 still has a queued or running execution' >&2
+            exit 1
+          }
+          environment_json="$(gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/environments/${ENVIRONMENT_NAME}")"
+          jq -e '
+            any(.protection_rules[]?;
+              .type == "required_reviewers" and
+              .prevent_self_review == true and
+              ((.reviewers // []) | length > 0)
+            )
+          ' <<<"$environment_json" >/dev/null || {
+            echo 'The release environment must require a non-self reviewer' >&2
+            exit 1
+          }
+          jq -e '
+            .deployment_branch_policy.protected_branches == false and
+            .deployment_branch_policy.custom_branch_policies == true
+          ' <<<"$environment_json" >/dev/null || {
+            echo 'The release environment must use custom tag policies' >&2
+            exit 1
+          }
+          policy_json="$(gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/environments/${ENVIRONMENT_NAME}/deployment-branch-policies?per_page=100")"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            policy_type='branch'
+            policy_name='main'
+          else
+            policy_type='tag'
+            policy_name='v*'
+          fi
+          jq -e --arg policy_type "$policy_type" --arg policy_name "$policy_name" '
+            .total_count == 1 and
+            (.branch_policies | length) == 1 and
+            .branch_policies[0].type == $policy_type and
+            .branch_policies[0].name == $policy_name
+          ' \
+            <<<"$policy_json" >/dev/null || {
+            echo "The ${ENVIRONMENT_NAME} environment has the wrong deployment policy" >&2
+            exit 1
+          }
+
+          main_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${MAIN_RULESET_ID}")"
+          jq -e '
+            .enforcement == "active" and
+            .target == "branch" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            .bypass_actors == [] and
+            (.conditions.ref_name.include // []) == ["refs/heads/main"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?;
+              .type == "pull_request" and
+              ((.parameters.required_approving_review_count // 0) >= 1) and
+              .parameters.require_code_owner_review == true and
+              (
+                .parameters.dismiss_stale_reviews_on_push == true or
+                .parameters.require_last_push_approval == true
+              ) and
+              .parameters.required_review_thread_resolution == true
+            ) and
+            any(.rules[]?;
+              .type == "required_status_checks" and
+              .parameters.strict_required_status_checks_policy == true and
+              ((.parameters.required_status_checks // []) as $checks |
+                any($checks[]?;
+                  .context == "Quality (lint, types, tests, builds)" and .integration_id == 15368
+                ) and
+                any($checks[]?;
+                  .context == "Dependency Audit" and .integration_id == 15368
+                )
+              )
+            ) and
+            any(.rules[]?; .type == "deletion") and
+            any(.rules[]?; .type == "non_fast_forward")
+          ' <<<"$main_ruleset" >/dev/null || {
+            echo 'MAIN_RULESET_ID must identify the active, reviewed, green, non-force-push main ruleset' >&2
+            exit 1
+          }
+
+          tag_creation_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_CREATION_RULESET_ID}")"
+          jq -e --argjson team_id "$STABLE_TAG_BYPASS_TEAM_ID" '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            (.bypass_actors | length) == 1 and
+            .bypass_actors[0].actor_type == "Team" and
+            .bypass_actors[0].actor_id == $team_id and
+            .bypass_actors[0].bypass_mode == "always" and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "creation") and
+            all(.rules[]?; .type != "update" and .type != "deletion")
+          ' <<<"$tag_creation_ruleset" >/dev/null || {
+            echo 'STABLE_TAG_CREATION_RULESET_ID must identify the active v* creation-only operator ruleset' >&2
+            exit 1
+          }
+          tag_immutability_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_IMMUTABILITY_RULESET_ID}")"
+          jq -e '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            .bypass_actors == [] and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "update") and
+            any(.rules[]?; .type == "deletion") and
+            all(.rules[]?; .type != "creation")
+          ' <<<"$tag_immutability_ruleset" >/dev/null || {
+            echo 'STABLE_TAG_IMMUTABILITY_RULESET_ID must identify the active, zero-bypass v* update/deletion ruleset' >&2
+            exit 1
+          }
+          immutable_releases="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases")"
+          jq -e '.enabled == true' <<<"$immutable_releases" >/dev/null || {
+            echo 'Repository immutable releases must be enabled before release' >&2
+            exit 1
+          }
+
+  macos:
+    name: Signed macOS universal desktop
+    needs: [preflight, release-gate]
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.20.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Materialize the Apple notarization key
+        shell: bash
+        env:
+          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$APPLE_API_KEY_CONTENT" || -z "$APPLE_API_KEY_ID" ]]; then
+            echo 'APPLE_API_KEY and APPLE_API_KEY_ID are required in the selected protected environment' >&2
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+          printf '%s' "$APPLE_API_KEY_CONTENT" > "$key_path"
+          chmod 600 "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+
+      - name: Build, sign, and notarize without publishing
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            if [[ -z "${!name}" ]]; then
+              echo "${name} is required in the selected protected environment" >&2
+              exit 1
+            fi
+          done
+          test -s "$APPLE_API_KEY"
+          pnpm --filter postshow build
+          pnpm --filter @eventools/postshow-desktop build
+          pnpm --filter @eventools/postshow-desktop exec electron-builder --mac --publish never -c.forceCodeSigning=true
+
+      - name: Verify signatures, notarization, staple, architectures, and metadata
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dist="apps/postshow-desktop/dist"
+          dmg="$dist/Postshow-${VERSION}-mac-universal.dmg"
+          zip="$dist/Postshow-${VERSION}-mac-universal.zip"
+          metadata="$dist/latest-mac.yml"
+          generated_icon="$dist/.icon-icns/icon.icns"
+          for file in "$dmg" "$dmg.blockmap" "$zip" "$zip.blockmap" "$metadata"; do
+            test -s "$file"
+          done
+          test -s "$generated_icon"
+          pnpm --filter @eventools/postshow-desktop verify:package \
+            "$GITHUB_WORKSPACE/$dist/mac-universal/Postshow.app/Contents/Resources/app.asar"
+          grep -Fx "version: ${VERSION}" "$metadata"
+          grep -F "url: Postshow-${VERSION}-mac-universal.zip" "$metadata"
+          verify_metadata_hash() {
+            local artifact="$1"
+            local name
+            local expected
+            local actual
+            name="$(basename "$artifact")"
+            expected="$(awk -v target="$name" '$0 == "  - url: " target { getline; sub(/^    sha512: /, ""); print; exit }' "$metadata")"
+            actual="$(openssl dgst -sha512 -binary "$artifact" | openssl base64 -A)"
+            [[ -n "$expected" && "$actual" == "$expected" ]]
+          }
+          verify_metadata_hash "$zip"
+          verify_metadata_hash "$dmg"
+
+          verify_update_config() {
+            local bundle="$1"
+            POSTSHOW_APP_UPDATE="$bundle/Contents/Resources/app-update.yml" \
+              pnpm --filter @eventools/postshow-desktop exec node -e '
+                const fs = require("node:fs");
+                const { createRequire } = require("node:module");
+                const fromBuilder = createRequire(require.resolve("electron-builder/package.json"));
+                const yaml = fromBuilder("js-yaml");
+                const config = yaml.load(fs.readFileSync(process.env.POSTSHOW_APP_UPDATE, "utf8"));
+                if (
+                  config.provider !== "github" ||
+                  config.owner !== "eventools-io" ||
+                  config.repo !== "postshow" ||
+                  config.channel !== "latest" ||
+                  config.token != null ||
+                  config.private === true
+                ) {
+                  throw new Error("packaged macOS updater is not bound to the exact public stable feed");
+                }
+              '
+          }
+
+          verify_app() {
+            local bundle="$1"
+            cmp "$generated_icon" "$bundle/Contents/Resources/icon.icns"
+            verify_update_config "$bundle"
+            codesign --verify --deep --strict --verbose=2 "$bundle"
+            signature="$(codesign --display --verbose=4 "$bundle" 2>&1)"
+            grep -q '^Authority=Developer ID Application:' <<<"$signature"
+            grep -Fxq "TeamIdentifier=${APPLE_TEAM_ID}" <<<"$signature"
+            spctl --assess --type execute --verbose=2 "$bundle"
+            xcrun stapler validate "$bundle"
+            architectures="$(lipo -archs "$bundle/Contents/MacOS/Postshow")"
+            grep -qw arm64 <<<"$architectures"
+            grep -qw x86_64 <<<"$architectures"
+          }
+
+          probe_packaged_credentials() {
+            local bundle="$1"
+            local executable="$bundle/Contents/MacOS/Postshow"
+            local actual_arch
+            actual_arch="$(ELECTRON_RUN_AS_NODE=1 "$executable" -p 'process.arch')"
+            [[ "$actual_arch" == arm64 ]]
+            ELECTRON_RUN_AS_NODE=1 "$executable" \
+              "$bundle/Contents/Resources/app.asar/out/main/keyring-selftest.js"
+          }
+
+          launch_app() {
+            local bundle="$1"
+            local log="$RUNNER_TEMP/postshow-macos-launch.log"
+            local config="$RUNNER_TEMP/postshow-macos-profile"
+            mkdir -p "$config"
+            POSTSHOW_CONFIG_DIR="$config" "$bundle/Contents/MacOS/Postshow" >"$log" 2>&1 &
+            local pid=$!
+            sleep 10
+            if ! kill -0 "$pid" 2>/dev/null; then
+              wait "$pid" || true
+              cat "$log" >&2
+              echo 'Signed macOS application exited during launch acceptance' >&2
+              return 1
+            fi
+            kill -TERM "$pid"
+            for _ in $(seq 1 20); do
+              if ! kill -0 "$pid" 2>/dev/null; then break; fi
+              sleep 0.5
+            done
+            if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid"; fi
+            wait "$pid" 2>/dev/null || true
+          }
+
+          verify_app "$dist/mac-universal/Postshow.app"
+          probe_packaged_credentials "$dist/mac-universal/Postshow.app"
+
+          mount_point="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg"
+          trap 'hdiutil detach "$mount_point" || true; rm -rf "$mount_point"' EXIT
+          verify_app "$mount_point/Postshow.app"
+
+          install_root="$(mktemp -d)/Applications"
+          mkdir -p "$install_root"
+          installed_app="$install_root/Postshow.app"
+          previous_app="$install_root/Postshow.previous.app"
+          ditto "$mount_point/Postshow.app" "$installed_app"
+          verify_app "$installed_app"
+          probe_packaged_credentials "$installed_app"
+          launch_app "$installed_app"
+
+          # Exercise an Applications-style exact-candidate replacement rather
+          # than treating a mounted image as installed lifecycle evidence.
+          mv "$installed_app" "$previous_app"
+          ditto "$mount_point/Postshow.app" "$installed_app"
+          verify_app "$installed_app"
+          probe_packaged_credentials "$installed_app"
+          launch_app "$installed_app"
+          rm -rf "$previous_app" "$installed_app"
+          test ! -e "$previous_app"
+          test ! -e "$installed_app"
+          rmdir "$install_root"
+          rmdir "$(dirname "$install_root")"
+
+          hdiutil detach "$mount_point"
+          rm -rf "$mount_point"
+          trap - EXIT
+
+          zip_dir="$(mktemp -d)"
+          ditto -x -k "$zip" "$zip_dir"
+          verify_app "$zip_dir/Postshow.app"
+          rm -rf "$zip_dir"
+
+          mkdir release-mac
+          cp "$dmg" "$dmg.blockmap" "$zip" "$zip.blockmap" "$metadata" release-mac/
+
+      - name: Remove the temporary notarization key
+        if: always()
+        shell: bash
+        run: rm -f "$APPLE_API_KEY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-macos
+          path: release-mac/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+  macos-intel-verify:
+    name: Native macOS Intel install acceptance
+    needs: [preflight, macos]
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-macos
+          path: release-mac
+      - name: Verify, install, roundtrip, launch, and remove natively
+        shell: bash
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$(uname -m)" != x86_64 ]]; then
+            echo "Runner is not native Intel hardware: $(uname -m)" >&2
+            exit 1
+          fi
+          dmg="release-mac/Postshow-${VERSION}-mac-universal.dmg"
+          test -s "$dmg"
+          mount_point="$(mktemp -d)"
+          install_parent="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_point" 2>/dev/null || true; rm -rf "$mount_point" "$install_parent"' EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount_point" "$dmg"
+          source_app="$mount_point/Postshow.app"
+          executable="$source_app/Contents/MacOS/Postshow"
+          codesign --verify --deep --strict --verbose=2 "$source_app"
+          signature="$(codesign --display --verbose=4 "$source_app" 2>&1)"
+          grep -q '^Authority=Developer ID Application:' <<<"$signature"
+          grep -Fxq "TeamIdentifier=${APPLE_TEAM_ID}" <<<"$signature"
+          spctl --assess --type execute --verbose=2 "$source_app"
+          xcrun stapler validate "$source_app"
+          architectures="$(lipo -archs "$executable")"
+          grep -qw arm64 <<<"$architectures"
+          grep -qw x86_64 <<<"$architectures"
+
+          installed_app="$install_parent/Applications/Postshow.app"
+          mkdir -p "$(dirname "$installed_app")"
+          ditto "$source_app" "$installed_app"
+          installed_executable="$installed_app/Contents/MacOS/Postshow"
+          actual_arch="$(ELECTRON_RUN_AS_NODE=1 "$installed_executable" -p 'process.arch')"
+          [[ "$actual_arch" == x64 ]]
+          ELECTRON_RUN_AS_NODE=1 "$installed_executable" \
+            "$installed_app/Contents/Resources/app.asar/out/main/keyring-selftest.js"
+
+          log="$RUNNER_TEMP/postshow-macos-intel-launch.log"
+          profile="$RUNNER_TEMP/postshow-macos-intel-profile"
+          mkdir -p "$profile"
+          POSTSHOW_CONFIG_DIR="$profile" "$installed_executable" >"$log" 2>&1 &
+          pid=$!
+          sleep 10
+          if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" || true
+            cat "$log" >&2
+            echo 'Signed macOS Intel application exited during launch acceptance' >&2
+            exit 1
+          fi
+          kill -TERM "$pid"
+          for _ in $(seq 1 20); do
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 0.5
+          done
+          if kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid"; fi
+          wait "$pid" 2>/dev/null || true
+
+          rm -rf "$installed_app"
+          test ! -e "$installed_app"
+          hdiutil detach "$mount_point"
+          rm -rf "$mount_point" "$install_parent"
+          trap - EXIT
+
+  windows-build:
+    # Both architectures must be built in one electron-builder invocation.
+    # latest.yml is then merged from these exact signed installers instead of
+    # being overwritten by a later architecture-specific process.
+    name: Build signed Windows desktop and metadata
+    needs: [preflight, release-gate]
+    runs-on: windows-2025
+    timeout-minutes: 45
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 10.20.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build both signed architectures together without publishing
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          WIN_PUBLISHER_DN: ${{ vars.WIN_PUBLISHER_DN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('CSC_LINK', 'CSC_KEY_PASSWORD', 'WIN_PUBLISHER_DN')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "$name is required in the selected protected environment"
+            }
+          }
+          pnpm --filter postshow build
+          pnpm --filter @eventools/postshow-desktop build
+          pnpm --filter @eventools/postshow-desktop exec electron-builder --win nsis --x64 --arm64 --publish never -c.forceCodeSigning=true "-c.win.signtoolOptions.publisherName=$env:WIN_PUBLISHER_DN"
+      - name: Validate merged metadata against both signed installers
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          WIN_PUBLISHER_DN: ${{ vars.WIN_PUBLISHER_DN }}
+          WIN_SIGNER_SHA1: ${{ vars.WIN_SIGNER_SHA1 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = 'apps/postshow-desktop/dist'
+          $metadata = Join-Path $dist 'latest.yml'
+          if (-not (Test-Path -LiteralPath $metadata -PathType Leaf)) { throw 'Missing latest.yml' }
+          $generatedIcon = (Resolve-Path -LiteralPath (Join-Path $dist '.icon-ico/icon.ico')).Path
+          $x64Application = (Resolve-Path -LiteralPath (Join-Path $dist 'win-unpacked/Postshow.exe')).Path
+          $arm64Application = (Resolve-Path -LiteralPath (Join-Path $dist 'win-arm64-unpacked/Postshow.exe')).Path
+          pnpm --filter @eventools/postshow-desktop verify:windows-icons $generatedIcon $x64Application $arm64Application
+          if ($LASTEXITCODE -ne 0) { throw 'Generated Windows icon is not exactly embedded in both applications' }
+          $content = Get-Content -LiteralPath $metadata -Raw
+          if ($content -notmatch "(?m)^version: $([regex]::Escape($env:VERSION))$") {
+            throw 'latest.yml version does not match the release'
+          }
+          function Get-PeMachine([string]$Path) {
+            $stream = [System.IO.File]::OpenRead($Path)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              $stream.Position = 0x3c
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset + 4
+              return $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+          }
+
+          $thumbprints = @()
+          foreach ($arch in @('x64', 'arm64')) {
+            $name = "Postshow-$env:VERSION-win-$arch.exe"
+            if ($content -notmatch [regex]::Escape("url: $name")) {
+              throw "latest.yml does not contain $name"
+            }
+            $installer = Join-Path $dist $name
+            $blockmap = "$installer.blockmap"
+            $unpacked = if ($arch -eq 'x64') {
+              Join-Path $dist 'win-unpacked/Postshow.exe'
+            } else {
+              Join-Path $dist 'win-arm64-unpacked/Postshow.exe'
+            }
+            $appUpdate = Join-Path (Split-Path -Parent $unpacked) 'resources/app-update.yml'
+            foreach ($file in @($installer, $blockmap, $unpacked, $appUpdate)) {
+              if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing release output: $file" }
+              if ((Get-Item -LiteralPath $file).Length -le 0) { throw "Empty release output: $file" }
+            }
+            $asar = Join-Path (Split-Path -Parent $unpacked) 'resources/app.asar'
+            $resolvedAsar = (Resolve-Path -LiteralPath $asar).Path
+            pnpm --filter @eventools/postshow-desktop verify:package $resolvedAsar
+            $env:POSTSHOW_APP_UPDATE = (Resolve-Path -LiteralPath $appUpdate).Path
+            pnpm --filter @eventools/postshow-desktop exec node -e @'
+          const fs = require('node:fs');
+          const { createRequire } = require('node:module');
+          const fromBuilder = createRequire(require.resolve('electron-builder/package.json'));
+          const yaml = fromBuilder('js-yaml');
+          const config = yaml.load(fs.readFileSync(process.env.POSTSHOW_APP_UPDATE, 'utf8'));
+          if (
+            config.provider !== 'github' ||
+            config.owner !== 'eventools-io' ||
+            config.repo !== 'postshow' ||
+            config.channel !== 'latest' ||
+            config.token != null ||
+            config.private === true ||
+            !Array.isArray(config.publisherName) ||
+            config.publisherName.length !== 1 ||
+            config.publisherName[0] !== process.env.WIN_PUBLISHER_DN
+          ) {
+            throw new Error('app-update.yml publisherName does not exactly match WIN_PUBLISHER_DN');
+          }
+          '@
+            if ($LASTEXITCODE -ne 0) { throw "Invalid Windows updater publisher allowlist: $arch" }
+            Remove-Item Env:POSTSHOW_APP_UPDATE -ErrorAction SilentlyContinue
+            $hashMatch = [regex]::Match(
+              $content,
+              "(?ms)^  - url: $([regex]::Escape($name))\r?\n    sha512: ([A-Za-z0-9+/=]+)"
+            )
+            if (-not $hashMatch.Success) { throw "latest.yml has no hash for $name" }
+            $actualHash = [Convert]::ToBase64String(
+              [System.Security.Cryptography.SHA512]::HashData(
+                [System.IO.File]::ReadAllBytes($installer)
+              )
+            )
+            if ($actualHash -ne $hashMatch.Groups[1].Value) {
+              throw "latest.yml hash does not match $name"
+            }
+            foreach ($file in @($installer, $unpacked)) {
+              $signature = Get-AuthenticodeSignature -LiteralPath $file
+              if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
+                throw "Invalid Authenticode signature: $file ($($signature.Status))"
+              }
+              if ($null -eq $signature.TimeStamperCertificate) {
+                throw "Authenticode signature is not timestamped: $file"
+              }
+              $expectedThumbprint = $env:WIN_SIGNER_SHA1.Replace(' ', '').ToUpperInvariant()
+              if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) {
+                throw "Unexpected Authenticode signer: $file"
+              }
+              $expectedPublisher = [System.Security.Cryptography.X509Certificates.X500DistinguishedName]::new(
+                $env:WIN_PUBLISHER_DN
+              )
+              $dnFlags = [System.Security.Cryptography.X509Certificates.X500DistinguishedNameFlags]::UseCommas
+              $expectedSubject = $expectedPublisher.Decode($dnFlags)
+              $actualSubject = $signature.SignerCertificate.SubjectName.Decode($dnFlags)
+              if ($actualSubject -cne $expectedSubject) {
+                throw "Signer subject does not exactly match WIN_PUBLISHER_DN: $file"
+              }
+              $thumbprints += $signature.SignerCertificate.Thumbprint
+            }
+            $expectedMachine = if ($arch -eq 'x64') { 0x8664 } else { 0xaa64 }
+            if ((Get-PeMachine $unpacked) -ne $expectedMachine) {
+              throw "Application PE architecture does not match $arch"
+            }
+          }
+          if (($thumbprints | Select-Object -Unique).Count -ne 1) {
+            throw 'Every installer and application must use the same signing certificate'
+          }
+
+          New-Item -ItemType Directory -Path release-win -Force | Out-Null
+          Copy-Item -LiteralPath $metadata -Destination release-win
+          Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-x64.exe") -Destination release-win
+          Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-x64.exe.blockmap") -Destination release-win
+          Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-arm64.exe") -Destination release-win
+          Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-arm64.exe.blockmap") -Destination release-win
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-windows
+          path: release-win/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+  windows-verify:
+    name: Native Windows install acceptance (${{ matrix.arch }})
+    needs: [preflight, windows-build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && 'release-dry-run' || 'release' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+            process_arch: AMD64
+            node_arch: x64
+            pe_machine: '34404'
+          - arch: arm64
+            runner: windows-11-arm
+            process_arch: ARM64
+            node_arch: arm64
+            pe_machine: '43620'
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-windows
+          path: release-win
+      - name: Verify, install, launch, repair, and uninstall natively
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_ARCH: ${{ matrix.arch }}
+          EXPECTED_PROCESS_ARCH: ${{ matrix.process_arch }}
+          EXPECTED_NODE_ARCH: ${{ matrix.node_arch }}
+          EXPECTED_PE_MACHINE: ${{ matrix.pe_machine }}
+          WIN_PUBLISHER_DN: ${{ vars.WIN_PUBLISHER_DN }}
+          WIN_SIGNER_SHA1: ${{ vars.WIN_SIGNER_SHA1 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:PROCESSOR_ARCHITECTURE.ToUpperInvariant() -ne $env:EXPECTED_PROCESS_ARCH) {
+            throw "Runner is not native $env:RELEASE_ARCH hardware: $env:PROCESSOR_ARCHITECTURE"
+          }
+          $installer = "release-win/Postshow-$env:VERSION-win-$env:RELEASE_ARCH.exe"
+          $blockmap = "$installer.blockmap"
+          $metadata = 'release-win/latest.yml'
+          foreach ($file in @($installer, $blockmap, $metadata)) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing handoff: $file" }
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $null -eq $signature.TimeStamperCertificate) {
+            throw "Handed-off installer signature is invalid: $($signature.Status)"
+          }
+          $expectedThumbprint = $env:WIN_SIGNER_SHA1.Replace(' ', '').ToUpperInvariant()
+          if ($signature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) {
+            throw 'Handed-off installer has an unexpected signer'
+          }
+          $content = Get-Content -LiteralPath $metadata -Raw
+          $name = Split-Path -Leaf $installer
+          if ($content -notmatch [regex]::Escape("url: $name")) {
+            throw "latest.yml does not reference $name"
+          }
+
+          function Get-PeMachine([string]$Path) {
+            $stream = [System.IO.File]::OpenRead($Path)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              $stream.Position = 0x3c
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset + 4
+              return $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+          }
+
+          function Assert-SignedByReleaseIdentity([string]$Path) {
+            $candidateSignature = Get-AuthenticodeSignature -LiteralPath $Path
+            if (
+              $candidateSignature.Status -ne 'Valid' -or
+              $null -eq $candidateSignature.SignerCertificate -or
+              $null -eq $candidateSignature.TimeStamperCertificate
+            ) {
+              throw "Invalid or untimestamped Authenticode signature: $Path ($($candidateSignature.Status))"
+            }
+            if ($candidateSignature.SignerCertificate.Thumbprint.ToUpperInvariant() -ne $expectedThumbprint) {
+              throw "Unexpected Authenticode signer: $Path"
+            }
+            $expectedPublisher = [System.Security.Cryptography.X509Certificates.X500DistinguishedName]::new(
+              $env:WIN_PUBLISHER_DN
+            )
+            $dnFlags = [System.Security.Cryptography.X509Certificates.X500DistinguishedNameFlags]::UseCommas
+            $expectedSubject = $expectedPublisher.Decode($dnFlags)
+            $actualSubject = $candidateSignature.SignerCertificate.SubjectName.Decode($dnFlags)
+            if ($actualSubject -cne $expectedSubject) {
+              throw "Signer subject does not exactly match WIN_PUBLISHER_DN: $Path"
+            }
+          }
+
+          function Assert-NativeInstalledApp([string]$Application) {
+            if (-not (Test-Path -LiteralPath $Application -PathType Leaf)) {
+              throw "Installer did not create the application: $Application"
+            }
+            Assert-SignedByReleaseIdentity $Application
+            if ((Get-PeMachine $Application) -ne [int]$env:EXPECTED_PE_MACHINE) {
+              throw "Installed application is not native $env:RELEASE_ARCH"
+            }
+          }
+
+          function Assert-PackagedCredentialRoundtrip([string]$Application) {
+            $selfTest = Join-Path (Split-Path -Parent $Application) 'resources/app.asar/out/main/keyring-selftest.js'
+            $env:ELECTRON_RUN_AS_NODE = '1'
+            try {
+              $actualArch = (& $Application -p 'process.arch' | Out-String).Trim()
+              if ($LASTEXITCODE -ne 0 -or $actualArch -ne $env:EXPECTED_NODE_ARCH) {
+                throw "Packaged Electron architecture $actualArch is not $env:EXPECTED_NODE_ARCH"
+              }
+              & $Application $selfTest
+              if ($LASTEXITCODE -ne 0) { throw "Packaged credential roundtrip exited $LASTEXITCODE" }
+            } finally {
+              Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
+            }
+          }
+
+          function Assert-AppLaunches([string]$Application) {
+            $process = Start-Process -FilePath $Application -PassThru
+            try {
+              Start-Sleep -Seconds 10
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "Installed application exited during native launch acceptance: $($process.ExitCode)"
+              }
+            } finally {
+              if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force
+                $process.WaitForExit()
+              }
+            }
+          }
+
+          $expectedThumbprint = $env:WIN_SIGNER_SHA1.Replace(' ', '').ToUpperInvariant()
+          Assert-SignedByReleaseIdentity $installer
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs/Postshow'
+          $application = Join-Path $installRoot 'Postshow.exe'
+          $uninstaller = Join-Path $installRoot 'Uninstall Postshow.exe'
+          if (Test-Path -LiteralPath $application) {
+            throw "Acceptance runner was not clean: $application already exists"
+          }
+
+          $firstInstall = Start-Process -FilePath (Resolve-Path -LiteralPath $installer) -ArgumentList '/S' -Wait -PassThru
+          if ($firstInstall.ExitCode -ne 0) { throw "Silent install exited $($firstInstall.ExitCode)" }
+          Assert-NativeInstalledApp $application
+          Assert-PackagedCredentialRoundtrip $application
+          Assert-AppLaunches $application
+
+          # A second exact installer run exercises the supported repair/reinstall
+          # path without fabricating an unsigned lower-version package.
+          $repair = Start-Process -FilePath (Resolve-Path -LiteralPath $installer) -ArgumentList '/S' -Wait -PassThru
+          if ($repair.ExitCode -ne 0) { throw "Silent repair exited $($repair.ExitCode)" }
+          Assert-NativeInstalledApp $application
+          Assert-PackagedCredentialRoundtrip $application
+          Assert-AppLaunches $application
+
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+            throw "Missing NSIS uninstaller: $uninstaller"
+          }
+          Assert-SignedByReleaseIdentity $uninstaller
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) { throw "Silent uninstall exited $($uninstall.ExitCode)" }
+          for ($attempt = 0; $attempt -lt 30 -and (Test-Path -LiteralPath $application); $attempt++) {
+            Start-Sleep -Seconds 1
+          }
+          if (Test-Path -LiteralPath $application) {
+            throw "Silent uninstall left the installed application behind: $application"
+          }
+
+  dry-run-acceptance:
+    name: Read back signed release artifacts without publishing
+    if: github.event_name == 'workflow_dispatch'
+    needs: [preflight, release-gate, macos, macos-intel-verify, windows-build, windows-verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-package
+          path: incoming/cli
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-macos
+          path: incoming/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-windows
+          path: incoming/windows
+      - name: Verify the handed-off set and generate its checksum manifest
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+          mkdir verified-release
+          cp incoming/cli/* incoming/macos/* incoming/windows/* verified-release/
+          expected=(
+            "postshow-${VERSION}.tgz"
+            "Postshow-${VERSION}-mac-universal.dmg"
+            "Postshow-${VERSION}-mac-universal.dmg.blockmap"
+            "Postshow-${VERSION}-mac-universal.zip"
+            "Postshow-${VERSION}-mac-universal.zip.blockmap"
+            "latest-mac.yml"
+            "Postshow-${VERSION}-win-x64.exe"
+            "Postshow-${VERSION}-win-x64.exe.blockmap"
+            "Postshow-${VERSION}-win-arm64.exe"
+            "Postshow-${VERSION}-win-arm64.exe.blockmap"
+            "latest.yml"
+          )
+          for file in "${expected[@]}"; do test -s "verified-release/$file"; done
+          find verified-release -maxdepth 1 -type f -printf '%f\n' | sort > actual-files.txt
+          printf '%s\n' "${expected[@]}" | sort > expected-files.txt
+          diff -u expected-files.txt actual-files.txt
+          (
+            cd verified-release
+            printf '%s\n' "${expected[@]}" | sort | xargs sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-release-dry-run-${{ needs.preflight.outputs.version }}
+          path: verified-release/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 90
+
+  release:
+    name: Publish validated release
+    if: github.event_name == 'push'
+    needs: [preflight, release-gate, macos, macos-intel-verify, windows-build, windows-verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    environment:
+      name: release
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install the reviewed npm CLI used for OIDC and signature verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/npm-11.18.0.tgz"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --connect-timeout 10 --max-time 120 \
+            'https://registry.npmjs.org/npm/-/npm-11.18.0.tgz' -o "$archive"
+          actual="sha512-$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)"
+          expected='sha512-T67M4L5wNm0cZ7EBLErcEkY1SmzEW/WJ+SADBzsFUY1UdAPfFHXFQtZ6SEXiK0+vzXysCvAsepbMaBTwnrAD+w=='
+          if [[ "$actual" != "$expected" ]]; then
+            echo 'Pinned npm 11.18.0 archive integrity does not match the reviewed digest' >&2
+            exit 1
+          fi
+          npm install --global "$archive" --ignore-scripts
+          [[ "$(npm --version)" == '11.18.0' ]]
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: cli-package
+          path: incoming/cli
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-macos
+          path: incoming/macos
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-windows
+          path: incoming/windows
+
+      - name: Assemble and checksum the exact public artifact set
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir release
+          cp incoming/cli/* incoming/macos/* incoming/windows/* release/
+
+          expected=(
+            "postshow-${VERSION}.tgz"
+            "Postshow-${VERSION}-mac-universal.dmg"
+            "Postshow-${VERSION}-mac-universal.dmg.blockmap"
+            "Postshow-${VERSION}-mac-universal.zip"
+            "Postshow-${VERSION}-mac-universal.zip.blockmap"
+            "latest-mac.yml"
+            "Postshow-${VERSION}-win-x64.exe"
+            "Postshow-${VERSION}-win-x64.exe.blockmap"
+            "Postshow-${VERSION}-win-arm64.exe"
+            "Postshow-${VERSION}-win-arm64.exe.blockmap"
+            "latest.yml"
+          )
+          for file in "${expected[@]}"; do test -s "release/$file"; done
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > actual-files.txt
+          printf '%s\n' "${expected[@]}" | sort > expected-files.txt
+          diff -u expected-files.txt actual-files.txt
+
+          grep -Fx "version: ${VERSION}" release/latest-mac.yml
+          grep -Fx "version: ${VERSION}" release/latest.yml
+          grep -F "url: Postshow-${VERSION}-mac-universal.zip" release/latest-mac.yml
+          grep -F "url: Postshow-${VERSION}-win-x64.exe" release/latest.yml
+          grep -F "url: Postshow-${VERSION}-win-arm64.exe" release/latest.yml
+
+          (
+            cd release
+            printf '%s\n' "${expected[@]}" | sort | xargs sha256sum > SHA256SUMS.txt
+            sha256sum -c SHA256SUMS.txt
+          )
+
+      - name: Fail closed on public provenance and monotonic release order
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_PUBLISHER: ${{ vars.NPM_PUBLISHER }}
+          NPM_PUBLISH_MODE: ${{ vars.NPM_PUBLISH_MODE }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          MAIN_RULESET_ID: ${{ vars.MAIN_RULESET_ID }}
+          STABLE_TAG_CREATION_RULESET_ID: ${{ vars.STABLE_TAG_CREATION_RULESET_ID }}
+          STABLE_TAG_IMMUTABILITY_RULESET_ID: ${{ vars.STABLE_TAG_IMMUTABILITY_RULESET_ID }}
+          STABLE_TAG_BYPASS_TEAM_ID: ${{ vars.STABLE_TAG_BYPASS_TEAM_ID }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected_repository="https://github.com/${GITHUB_REPOSITORY}.git"
+          package_repository="$(node -p "require('./packages/postshow-cli/package.json').repository.url")"
+          if [[ "$package_repository" != "$expected_repository" ]]; then
+            echo "CLI repository must exactly match the public provenance source: ${expected_repository}" >&2
+            exit 1
+          fi
+          if [[ "$(gh repo view "$GITHUB_REPOSITORY" --json visibility --jq .visibility)" != PUBLIC ]]; then
+            echo 'npm provenance and the desktop update feed require a PUBLIC GitHub repository' >&2
+            exit 1
+          fi
+          anonymous_repo="$RUNNER_TEMP/anonymous-repository.json"
+          curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}" > "$anonymous_repo"
+          jq -e --arg repository "$GITHUB_REPOSITORY" \
+            '.full_name == $repository and .private == false and .visibility == "public"' \
+            "$anonymous_repo" >/dev/null
+
+          compare_stable_versions() {
+            node - "$1" "$2" <<'NODE'
+          const [left, right] = process.argv.slice(2);
+          const stable = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+          if (!stable.test(left) || !stable.test(right)) process.exit(2);
+          const a = left.split('.').map(BigInt);
+          const b = right.split('.').map(BigInt);
+          for (let index = 0; index < 3; index += 1) {
+            if (a[index] > b[index]) { console.log('1'); process.exit(0); }
+            if (a[index] < b[index]) { console.log('-1'); process.exit(0); }
+          }
+          console.log('0');
+          NODE
+          }
+
+          tarball="release/postshow-${VERSION}.tgz"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          npm_packument="$RUNNER_TEMP/npm-packument.json"
+          npm_status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            --output "$npm_packument" --write-out '%{http_code}' \
+            'https://registry.npmjs.org/postshow')"
+          case "$npm_status" in
+            200)
+              jq -e '.name == "postshow"' "$npm_packument" >/dev/null
+              npm_latest="$(jq -r '.["dist-tags"].latest // empty' "$npm_packument")"
+              npm_exact_integrity="$(jq -r --arg version "$VERSION" '.versions[$version].dist.integrity // empty' "$npm_packument")"
+              npm_owners="$(npm owner ls postshow --registry=https://registry.npmjs.org | awk 'NF { print $1 }' | LC_ALL=C sort -u)"
+              if [[ "$npm_owners" != "$NPM_PUBLISHER" ]]; then
+                echo "Existing postshow package owner set must be exactly ${NPM_PUBLISHER}; found: ${npm_owners}" >&2
+                exit 1
+              fi
+              ;;
+            404)
+              npm_latest=''
+              npm_exact_integrity=''
+              ;;
+            *)
+              echo "Unexpected npm registry response while checking release order: HTTP ${npm_status}" >&2
+              exit 1
+              ;;
+          esac
+          case "$NPM_PUBLISH_MODE:$npm_status" in
+            bootstrap:404) ;;
+            bootstrap:200)
+              if ! jq -e --arg version "$VERSION" '
+                (.versions | keys) == [$version]
+              ' "$npm_packument" >/dev/null || [[ "$npm_exact_integrity" != "$local_integrity" ]]; then
+                echo 'Bootstrap recovery permits only this run exact single version; bootstrap is retired for every later version' >&2
+                exit 1
+              fi
+              ;;
+            trusted:200) ;;
+            trusted:*)
+              echo 'NPM_PUBLISH_MODE=trusted requires an existing bootstrapped postshow package' >&2
+              exit 1
+              ;;
+            *)
+              echo 'NPM_PUBLISH_MODE must be bootstrap or trusted' >&2
+              exit 1
+              ;;
+          esac
+          if [[ -n "$npm_latest" && ! "$npm_latest" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "npm latest is not a stable semantic version: ${npm_latest}" >&2
+            exit 1
+          fi
+          if [[ -n "$npm_exact_integrity" && "$npm_exact_integrity" != "$local_integrity" ]]; then
+            echo 'The exact npm version exists with different package bytes' >&2
+            exit 1
+          fi
+          if [[ -n "$npm_exact_integrity" ]]; then
+            npm_exact_attestation_url="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.url // empty' "$npm_packument")"
+            npm_exact_predicate="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.provenance.predicateType // empty' "$npm_packument")"
+            if [[
+              "$npm_exact_attestation_url" != "https://registry.npmjs.org/-/npm/v1/attestations/postshow@${VERSION}" ||
+              "$npm_exact_predicate" != 'https://slsa.dev/provenance/v1'
+            ]]; then
+              echo 'The exact npm recovery candidate is missing the required provenance metadata' >&2
+              exit 1
+            fi
+            curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              "$npm_exact_attestation_url" > "$RUNNER_TEMP/npm-existing-attestations.json"
+            jq -e '
+              any(.attestations[]?; .predicateType == "https://slsa.dev/provenance/v1") and
+              any(.attestations[]?; .predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1")
+            ' "$RUNNER_TEMP/npm-existing-attestations.json" >/dev/null || {
+              echo 'The exact npm recovery candidate is missing signed provenance or publish attestations' >&2
+              exit 1
+            }
+          fi
+
+          latest_release="$RUNNER_TEMP/github-latest.json"
+          github_status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            --output "$latest_release" --write-out '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest")"
+          case "$github_status" in
+            200) github_latest="$(jq -r '.tag_name // empty' "$latest_release")" ;;
+            404) github_latest='' ;;
+            *)
+              echo "Unexpected anonymous GitHub latest-release response: HTTP ${github_status}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ -n "$github_latest" && ! "$github_latest" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "GitHub latest is not a stable vX.Y.Z release: ${github_latest}" >&2
+            exit 1
+          fi
+          github_latest_version="${github_latest#v}"
+
+          exact_release=''
+          exact_release_is_draft=''
+          if exact_release="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
+            jq -e --arg tag "$TAG" \
+              '.tag_name == $tag and .prerelease == false and (.draft | type == "boolean")' \
+              <<<"$exact_release" >/dev/null || {
+              echo 'Refusing to recover a prerelease as a stable release' >&2
+              exit 1
+            }
+            exact_release_is_draft="$(jq -r .draft <<<"$exact_release")"
+            if [[ "$exact_release_is_draft" == false ]]; then
+              jq -e '.immutable == true' <<<"$exact_release" >/dev/null || {
+                echo 'An existing public recovery release must already be immutable' >&2
+                exit 1
+              }
+            fi
+          else
+            exact_release=''
+          fi
+
+          npm_comparison=1
+          github_comparison=1
+          if [[ -n "$npm_latest" ]]; then npm_comparison="$(compare_stable_versions "$VERSION" "$npm_latest")"; fi
+          if [[ -n "$github_latest_version" ]]; then github_comparison="$(compare_stable_versions "$VERSION" "$github_latest_version")"; fi
+
+          if (( npm_comparison < 0 )) && [[ -z "$npm_exact_integrity" ]]; then
+            echo 'An older unpublished npm version cannot be created because it would move latest backward' >&2
+            exit 1
+          fi
+          if (( github_comparison < 0 )) && [[ -z "$exact_release" ]]; then
+            echo 'An older GitHub release may only resume an existing exact draft/public release' >&2
+            exit 1
+          fi
+          if (( npm_comparison < 0 || github_comparison < 0 )) &&
+            [[ -z "$npm_exact_integrity" || -z "$exact_release" ]]; then
+            echo 'A lower-version recovery requires both the exact npm package and exact GitHub draft/public release' >&2
+            exit 1
+          fi
+          if (( npm_comparison == 0 )) && [[ -z "$npm_exact_integrity" ]]; then
+            echo 'npm latest names the candidate but the exact version metadata is absent' >&2
+            exit 1
+          fi
+          if (( github_comparison == 0 )) && [[ -z "$exact_release" ]]; then
+            echo 'GitHub latest names the candidate but the exact release is absent' >&2
+            exit 1
+          fi
+          if [[ -n "$exact_release" && "$exact_release_is_draft" == false ]] &&
+            (( github_comparison > 0 )); then
+            echo 'An immutable public candidate cannot be repaired into the latest release; release state is inconsistent' >&2
+            exit 1
+          fi
+
+          if (( npm_comparison <= 0 || github_comparison <= 0 )); then
+            if [[ -z "$npm_exact_integrity" && -z "$exact_release" ]]; then
+              echo 'Non-monotonic publication is allowed only for an existing exact-version recovery' >&2
+              exit 1
+            fi
+          fi
+
+          api_version='2026-03-10'
+          legacy_workflow="$(gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874")"
+          jq -e '
+            .id == 316997874 and
+            .path == ".github/workflows/release.yml" and
+            .state == "disabled_manually"
+          ' <<<"$legacy_workflow" >/dev/null
+          legacy_runs="$(gh api --paginate --slurp \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874/runs?per_page=100")"
+          jq -e 'all(.[]?.workflow_runs[]?; .status == "completed")' <<<"$legacy_runs" >/dev/null || {
+            echo 'Historical Release workflow still has a queued or running execution' >&2
+            exit 1
+          }
+          main_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${MAIN_RULESET_ID}")"
+          jq -e '
+            .enforcement == "active" and
+            .target == "branch" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            .bypass_actors == [] and
+            (.conditions.ref_name.include // []) == ["refs/heads/main"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?;
+              .type == "pull_request" and
+              ((.parameters.required_approving_review_count // 0) >= 1) and
+              .parameters.require_code_owner_review == true and
+              (
+                .parameters.dismiss_stale_reviews_on_push == true or
+                .parameters.require_last_push_approval == true
+              ) and
+              .parameters.required_review_thread_resolution == true
+            ) and
+            any(.rules[]?;
+              .type == "required_status_checks" and
+              .parameters.strict_required_status_checks_policy == true and
+              ((.parameters.required_status_checks // []) as $checks |
+                any($checks[]?;
+                  .context == "Quality (lint, types, tests, builds)" and .integration_id == 15368
+                ) and
+                any($checks[]?;
+                  .context == "Dependency Audit" and .integration_id == 15368
+                )
+              )
+            ) and
+            any(.rules[]?; .type == "deletion") and
+            any(.rules[]?; .type == "non_fast_forward")
+          ' <<<"$main_ruleset" >/dev/null
+          tag_creation_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_CREATION_RULESET_ID}")"
+          jq -e --argjson team_id "$STABLE_TAG_BYPASS_TEAM_ID" '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            (.bypass_actors | length) == 1 and
+            .bypass_actors[0].actor_type == "Team" and
+            .bypass_actors[0].actor_id == $team_id and
+            .bypass_actors[0].bypass_mode == "always" and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "creation") and
+            all(.rules[]?; .type != "update" and .type != "deletion")
+          ' <<<"$tag_creation_ruleset" >/dev/null
+          tag_immutability_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_IMMUTABILITY_RULESET_ID}")"
+          jq -e '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            .bypass_actors == [] and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "update") and
+            any(.rules[]?; .type == "deletion") and
+            all(.rules[]?; .type != "creation")
+          ' <<<"$tag_immutability_ruleset" >/dev/null
+          immutable_releases="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases")"
+          jq -e '.enabled == true' <<<"$immutable_releases" >/dev/null
+          remote_tag_sha="$(gh api \
+            -H "Cache-Control: no-cache" \
+            -H "X-GitHub-Api-Version: ${api_version}" \
+            "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+          if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Remote ${TAG} moved from the validated commit" >&2
+            exit 1
+          fi
+
+      - name: Stage a draft GitHub release and remove stale draft assets
+        id: github_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          remote_tag_sha="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+          if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Remote ${TAG} moved before draft staging" >&2
+            exit 1
+          fi
+          state="missing"
+          if release_json="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" 2>/dev/null)"; then
+            if [[ "$(jq -r .prerelease <<<"$release_json")" == true ]]; then
+              echo 'Refusing to mutate a prerelease for a stable tag' >&2
+              exit 1
+            fi
+            jq -e --arg tag "$TAG" '
+              .tag_name == $tag and
+              .author.login == "github-actions[bot]" and
+              .author.type == "Bot" and
+              .discussion_url == null
+            ' <<<"$release_json" >/dev/null || {
+              echo 'Only the hardened publisher may author the exact release; discussions are not allowed' >&2
+              exit 1
+            }
+            if [[ "$(jq -r .draft <<<"$release_json")" == true ]]; then state="draft"; else state="public"; fi
+          fi
+          if [[ "$state" == missing ]]; then
+            gh release create "$TAG" --draft --verify-tag --title "Postshow ${TAG#v}" --notes ''
+            state="draft"
+          fi
+
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
+          while IFS= read -r name; do
+            hash="$(sha256sum "release/$name" | awk '{ print $1 }')"
+            printf '%s\tsha256:%s\n' "$name" "$hash"
+          done < expected-assets.txt > expected-digests.txt
+          if [[ "$state" == public ]]; then
+            public_release="$(gh api \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+            jq -e --arg tag "$TAG" \
+              '.tag_name == $tag and
+               .draft == false and
+               .prerelease == false and
+               .immutable == true and
+               .author.login == "github-actions[bot]" and
+               .author.type == "Bot" and
+               .discussion_url == null and
+               all(.assets[]?; .uploader.login == "github-actions[bot]" and .uploader.type == "Bot")' \
+              <<<"$public_release" >/dev/null
+            jq -r '.assets[].name' <<<"$public_release" | sort > public-assets.txt
+            diff -u expected-assets.txt public-assets.txt
+            jq -r '.assets[] | [.name, .digest] | @tsv' <<<"$public_release" | sort > public-digests.txt
+            diff -u expected-digests.txt public-digests.txt
+            mkdir published-check
+            gh release download "$TAG" --dir published-check
+            cmp release/SHA256SUMS.txt published-check/SHA256SUMS.txt
+            (cd published-check && sha256sum -c SHA256SUMS.txt)
+            {
+              echo 'already_public=true'
+              echo "release_id=$(jq -r .id <<<"$public_release")"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          while IFS=$'\t' read -r id name; do
+            if ! grep -Fxq "$name" expected-assets.txt; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${id}"
+            fi
+          done < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq ".[] | select(.tag_name == \"${TAG}\") | .assets[] | [.id, .name] | @tsv"
+          )
+          gh release upload "$TAG" release/* --clobber
+          gh release view "$TAG" --json assets --jq '.assets[].name' | sort > draft-assets.txt
+          diff -u expected-assets.txt draft-assets.txt
+          draft_release="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          jq -e --arg tag "$TAG" \
+            '.tag_name == $tag and
+             .draft == true and
+             .prerelease == false and
+             .author.login == "github-actions[bot]" and
+             .author.type == "Bot" and
+             .discussion_url == null and
+             all(.assets[]?; .uploader.login == "github-actions[bot]" and .uploader.type == "Bot")' \
+            <<<"$draft_release" >/dev/null
+          jq -r '.assets[] | [.name, .digest] | @tsv' <<<"$draft_release" | sort > draft-digests.txt
+          diff -u expected-digests.txt draft-digests.txt
+          mkdir draft-check
+          gh release download "$TAG" --dir draft-check
+          cmp release/SHA256SUMS.txt draft-check/SHA256SUMS.txt
+          (cd draft-check && sha256sum -c SHA256SUMS.txt)
+          {
+            echo 'already_public=false'
+            echo "release_id=$(jq -r .id <<<"$draft_release")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the exact CLI tarball to npm with provenance
+        id: npm_publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NPM_BOOTSTRAP_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+          NPM_PUBLISHER: ${{ vars.NPM_PUBLISHER }}
+          NPM_PUBLISH_MODE: ${{ vars.NPM_PUBLISH_MODE }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          STABLE_TAG_CREATION_RULESET_ID: ${{ vars.STABLE_TAG_CREATION_RULESET_ID }}
+          STABLE_TAG_IMMUTABILITY_RULESET_ID: ${{ vars.STABLE_TAG_IMMUTABILITY_RULESET_ID }}
+          STABLE_TAG_BYPASS_TEAM_ID: ${{ vars.STABLE_TAG_BYPASS_TEAM_ID }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          case "$NPM_PUBLISH_MODE" in
+            bootstrap)
+              if [[ -z "$NPM_BOOTSTRAP_TOKEN" ]]; then
+                echo 'NPM_BOOTSTRAP_TOKEN is required only for the one-time package bootstrap' >&2
+                exit 1
+              fi
+              ;;
+            trusted)
+              if [[ -n "$NPM_BOOTSTRAP_TOKEN" ]]; then
+                echo 'Trusted OIDC publication requires NPM_BOOTSTRAP_TOKEN to be removed from the release environment' >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo 'NPM_PUBLISH_MODE must be bootstrap or trusted' >&2
+              exit 1
+              ;;
+          esac
+          tarball="release/postshow-${VERSION}.tgz"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          local_sha512="$(sha512sum "$tarball" | awk '{ print $1 }')"
+          temporary_tag="release-${VERSION//./-}"
+          packed_manifest="$RUNNER_TEMP/packed-package.json"
+          tar -xOf "$tarball" package/package.json > "$packed_manifest"
+          jq -e '
+            .name == "postshow" and
+            (.publishConfig // {}) == {"access":"public"}
+          ' "$packed_manifest" >/dev/null || {
+            echo 'Packed CLI publishConfig must contain only access=public; registry selection belongs to this workflow' >&2
+            exit 1
+          }
+
+          assert_npm_identity() {
+            local authenticated_publisher
+            authenticated_publisher="$(NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" \
+              npm whoami --registry=https://registry.npmjs.org)"
+            if [[ "$authenticated_publisher" != "$NPM_PUBLISHER" ]]; then
+              echo "NPM_BOOTSTRAP_TOKEN authenticates as ${authenticated_publisher}, expected ${NPM_PUBLISHER}" >&2
+              exit 1
+            fi
+          }
+
+          assert_release_guards() {
+            local legacy_runs legacy_workflow remote_tag_sha tag_creation_ruleset tag_immutability_ruleset
+            legacy_workflow="$(gh api \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874")"
+            jq -e '
+              .id == 316997874 and
+              .path == ".github/workflows/release.yml" and
+              .state == "disabled_manually"
+            ' <<<"$legacy_workflow" >/dev/null || {
+              echo 'Historical Release workflow was re-enabled before npm mutation' >&2
+              exit 1
+            }
+            legacy_runs="$(gh api --paginate --slurp \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874/runs?per_page=100")"
+            jq -e 'all(.[]?.workflow_runs[]?; .status == "completed")' <<<"$legacy_runs" >/dev/null || {
+              echo 'Historical Release workflow still has a queued or running execution before npm mutation' >&2
+              exit 1
+            }
+            tag_creation_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_CREATION_RULESET_ID}")"
+            jq -e --argjson team_id "$STABLE_TAG_BYPASS_TEAM_ID" '
+              .enforcement == "active" and
+              .target == "tag" and
+              has("bypass_actors") and
+              (.bypass_actors | type) == "array" and
+              (.bypass_actors | length) == 1 and
+              .bypass_actors[0].actor_type == "Team" and
+              .bypass_actors[0].actor_id == $team_id and
+              .bypass_actors[0].bypass_mode == "always" and
+              (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+              (.conditions.ref_name.exclude // []) == [] and
+              any(.rules[]?; .type == "creation") and
+              all(.rules[]?; .type != "update" and .type != "deletion")
+            ' <<<"$tag_creation_ruleset" >/dev/null || {
+              echo 'Stable-tag creation policy changed before npm mutation' >&2
+              exit 1
+            }
+            tag_immutability_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_IMMUTABILITY_RULESET_ID}")"
+            jq -e '
+              .enforcement == "active" and
+              .target == "tag" and
+              has("bypass_actors") and
+              (.bypass_actors | type) == "array" and
+              .bypass_actors == [] and
+              (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+              (.conditions.ref_name.exclude // []) == [] and
+              any(.rules[]?; .type == "update") and
+              any(.rules[]?; .type == "deletion") and
+              all(.rules[]?; .type != "creation")
+            ' <<<"$tag_immutability_ruleset" >/dev/null || {
+              echo 'Stable-tag immutability policy changed before npm mutation' >&2
+              exit 1
+            }
+            remote_tag_sha="$(gh api \
+              -H 'Cache-Control: no-cache' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+            if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Remote ${TAG} moved before npm mutation" >&2
+              exit 1
+            fi
+          }
+
+          packument="$RUNNER_TEMP/npm-before-publish.json"
+          status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            --output "$packument" --write-out '%{http_code}' \
+            'https://registry.npmjs.org/postshow')"
+          if [[ "$status" == 200 ]]; then
+            remote_integrity="$(jq -r --arg version "$VERSION" '.versions[$version].dist.integrity // empty' "$packument")"
+            current_latest="$(jq -r '.["dist-tags"].latest // empty' "$packument")"
+            npm_owners="$(npm owner ls postshow --registry=https://registry.npmjs.org | awk 'NF { print $1 }' | LC_ALL=C sort -u)"
+            if [[ "$npm_owners" != "$NPM_PUBLISHER" ]]; then
+              echo "postshow package owner set changed before mutation; expected only ${NPM_PUBLISHER}, found: ${npm_owners}" >&2
+              exit 1
+            fi
+          elif [[ "$status" == 404 ]]; then
+            remote_integrity=''
+            current_latest=''
+          else
+            echo "Unexpected npm registry response immediately before publication: HTTP ${status}" >&2
+            exit 1
+          fi
+          case "$NPM_PUBLISH_MODE:$status" in
+            bootstrap:404) ;;
+            bootstrap:200)
+              if ! jq -e --arg version "$VERSION" '(.versions | keys) == [$version]' "$packument" >/dev/null ||
+                [[ "$remote_integrity" != "$local_integrity" ]]; then
+                echo 'Bootstrap recovery permits only this run exact single version; bootstrap is retired for every later version' >&2
+                exit 1
+              fi
+              ;;
+            trusted:200) ;;
+            trusted:*)
+              echo 'Trusted mode requires the postshow package to have been bootstrapped already' >&2
+              exit 1
+              ;;
+          esac
+          if [[ -n "$remote_integrity" ]]; then
+            if [[ "$remote_integrity" != "$local_integrity" ]]; then
+              echo 'The npm version already exists with different package bytes' >&2
+              exit 1
+            fi
+            echo 'Exact npm package is already published; continuing an idempotent retry.'
+          else
+            if [[ "$NPM_PUBLISH_MODE" == trusted ]]; then
+              if [[ -z "$current_latest" || ! "$current_latest" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                echo "Trusted publication requires an existing stable npm latest tag; found: ${current_latest}" >&2
+                exit 1
+              fi
+              node - "$VERSION" "$current_latest" <<'NODE'
+          const [candidate, latest] = process.argv.slice(2).map((value) => value.split('.').map(BigInt));
+          for (let index = 0; index < 3; index += 1) {
+            if (candidate[index] > latest[index]) process.exit(0);
+            if (candidate[index] < latest[index]) process.exit(1);
+          }
+          process.exit(1);
+          NODE
+            fi
+            assert_release_guards
+            if [[ "$NPM_PUBLISH_MODE" == bootstrap ]]; then
+              assert_npm_identity
+              NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" \
+                npm publish "$tarball" --access public --provenance --tag "$temporary_tag" \
+                --registry=https://registry.npmjs.org
+            else
+              env -u NODE_AUTH_TOKEN npm publish "$tarball" --access public --provenance --tag latest \
+                --registry=https://registry.npmjs.org
+            fi
+          fi
+
+          # Do not expose this version through latest until npm has propagated
+          # the exact bytes, public access, singleton ownership, and both
+          # provenance attestations.
+          metadata_verified=false
+          for attempt in $(seq 1 12); do
+            packument="$RUNNER_TEMP/npm-before-latest-${attempt}.json"
+            status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              --output "$packument" --write-out '%{http_code}' \
+              'https://registry.npmjs.org/postshow' || true)"
+            if [[ "$status" == 200 ]]; then
+              remote_integrity="$(jq -r --arg version "$VERSION" '.versions[$version].dist.integrity // empty' "$packument")"
+              attestation_url="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.url // empty' "$packument")"
+              predicate="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.provenance.predicateType // empty' "$packument")"
+              owners="$(npm owner ls postshow --registry=https://registry.npmjs.org 2>/dev/null || true)"
+              owner_logins="$(awk 'NF { print $1 }' <<<"$owners" | LC_ALL=C sort -u)"
+              access="$(npm access get status postshow --json --registry=https://registry.npmjs.org 2>/dev/null || true)"
+              if [[
+                "$remote_integrity" == "$local_integrity" &&
+                "$attestation_url" == "https://registry.npmjs.org/-/npm/v1/attestations/postshow@${VERSION}" &&
+                "$predicate" == 'https://slsa.dev/provenance/v1' &&
+                "$owner_logins" == "$NPM_PUBLISHER"
+              ]] && jq -e '.postshow == "public"' <<<"$access" >/dev/null 2>&1; then
+                attestations="$RUNNER_TEMP/npm-attestations.json"
+                if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+                  -H 'Cache-Control: no-cache' \
+                  "$attestation_url" > "$attestations" &&
+                  jq -e '
+                    ([.attestations[]? | select(.predicateType == "https://slsa.dev/provenance/v1")] | length) == 1 and
+                    ([.attestations[]? | select(.predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1")] | length) == 1
+                  ' "$attestations" >/dev/null; then
+                  metadata_verified=true
+                  break
+                fi
+              fi
+            fi
+            sleep 5
+          done
+          if [[ "$metadata_verified" != true ]]; then
+            echo 'npm did not expose exact bytes, access, ownership, and both attestations before latest reconciliation' >&2
+            exit 1
+          fi
+
+          # npm itself verifies both Sigstore bundles and the downloaded
+          # tarball. Decode only the verified bundles, then bind their signed
+          # statements to this exact package and workflow invocation.
+          provenance_dir="$RUNNER_TEMP/postshow-provenance-verification"
+          mkdir "$provenance_dir"
+          (
+            cd "$provenance_dir"
+            npm init --yes >/dev/null
+            npm install --ignore-scripts --no-audit --no-fund --save-exact --prefer-online \
+              "postshow@${VERSION}" --registry=https://registry.npmjs.org >/dev/null
+            npm audit signatures --json --include-attestations \
+              --registry=https://registry.npmjs.org > audit-signatures.json
+          )
+          audit_json="$provenance_dir/audit-signatures.json"
+          jq -e --arg version "$VERSION" '
+            .invalid == [] and
+            .missing == [] and
+            ([.verified[]? |
+              select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/")
+            ] | length) == 1 and
+            ([.verified[]? |
+              select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/") |
+              .attestationBundles[]? |
+              select(.predicateType == "https://slsa.dev/provenance/v1")
+            ] | length) == 1 and
+            ([.verified[]? |
+              select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/") |
+              .attestationBundles[]? |
+              select(.predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1")
+            ] | length) == 1
+          ' "$audit_json" >/dev/null
+          jq -r --arg version "$VERSION" '
+            .verified[] |
+            select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/") |
+            .attestationBundles[] |
+            select(.predicateType == "https://slsa.dev/provenance/v1") |
+            .bundle.dsseEnvelope.payload
+          ' "$audit_json" | base64 --decode > "$provenance_dir/provenance-statement.json"
+          jq -e \
+            --arg commit "$GITHUB_SHA" \
+            --arg digest "$local_sha512" \
+            --arg invocation_prefix "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/" \
+            --arg purl "pkg:npm/postshow@${VERSION}" \
+            --arg repository "https://github.com/${GITHUB_REPOSITORY}" \
+            --arg source "git+https://github.com/${GITHUB_REPOSITORY}@refs/tags/${TAG}" \
+            --arg tag "refs/tags/${TAG}" '
+            ._type == "https://in-toto.io/Statement/v1" and
+            .predicateType == "https://slsa.dev/provenance/v1" and
+            (.subject | length) == 1 and
+            .subject[0].name == $purl and
+            .subject[0].digest.sha512 == $digest and
+            .predicate.buildDefinition.buildType == "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1" and
+            .predicate.buildDefinition.externalParameters.workflow.repository == $repository and
+            .predicate.buildDefinition.externalParameters.workflow.ref == $tag and
+            .predicate.buildDefinition.externalParameters.workflow.path == ".github/workflows/publish-release.yml" and
+            .predicate.buildDefinition.internalParameters.github.event_name == "push" and
+            ([.predicate.buildDefinition.resolvedDependencies[]? |
+              select(.uri == $source and .digest.gitCommit == $commit)
+            ] | length) == 1 and
+            .predicate.runDetails.builder.id == "https://github.com/actions/runner/github-hosted" and
+            (.predicate.runDetails.metadata.invocationId as $invocation |
+              ($invocation | startswith($invocation_prefix)) and
+              (($invocation | ltrimstr($invocation_prefix)) | test("^[1-9][0-9]*$")))
+          ' "$provenance_dir/provenance-statement.json" >/dev/null || {
+            echo 'Verified npm provenance is not bound to this exact package, tag, workflow, commit, and run' >&2
+            exit 1
+          }
+          jq -r --arg version "$VERSION" '
+            .verified[] |
+            select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/") |
+            .attestationBundles[] |
+            select(.predicateType == "https://slsa.dev/provenance/v1") |
+            .bundle.verificationMaterial.certificate.rawBytes
+          ' "$audit_json" | base64 --decode > "$provenance_dir/provenance-certificate.der"
+          node - \
+            "$provenance_dir/provenance-certificate.der" \
+            "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/publish-release.yml@refs/tags/${TAG}" \
+            "$GITHUB_SHA" \
+            "https://github.com/${GITHUB_REPOSITORY}" \
+            "refs/tags/${TAG}" \
+            "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/" \
+            "repo:${GITHUB_REPOSITORY}:environment:release" <<'NODE'
+          const fs = require('node:fs');
+          const { X509Certificate } = require('node:crypto');
+          const [certificatePath, workflowRef, sha, repository, tag, invocationPrefix, subject] = process.argv.slice(2);
+          const raw = fs.readFileSync(certificatePath);
+          const certificate = new X509Certificate(raw);
+
+          function readTlv(buffer, initialOffset, limit = buffer.length) {
+            let offset = initialOffset;
+            if (offset >= limit) throw new Error('missing DER tag');
+            const tag = buffer[offset++];
+            if ((tag & 0x1f) === 0x1f) {
+              let byte;
+              do {
+                if (offset >= limit) throw new Error('truncated high-number DER tag');
+                byte = buffer[offset++];
+              } while ((byte & 0x80) !== 0);
+            }
+            if (offset >= limit) throw new Error('missing DER length');
+            let length = buffer[offset++];
+            if ((length & 0x80) !== 0) {
+              const count = length & 0x7f;
+              if (count === 0 || count > 4 || offset + count > limit) throw new Error('invalid DER length');
+              length = 0;
+              for (let index = 0; index < count; index += 1) length = length * 256 + buffer[offset++];
+            }
+            const contentStart = offset;
+            const end = contentStart + length;
+            if (end > limit) throw new Error('DER value exceeds its container');
+            return { tag, contentStart, end };
+          }
+
+          function children(start, end) {
+            const values = [];
+            for (let offset = start; offset < end;) {
+              const value = readTlv(raw, offset, end);
+              values.push(value);
+              offset = value.end;
+            }
+            return values;
+          }
+
+          function decodeOid(bytes) {
+            const values = [];
+            let value = 0;
+            for (const byte of bytes) {
+              value = value * 128 + (byte & 0x7f);
+              if ((byte & 0x80) === 0) {
+                values.push(value);
+                value = 0;
+              }
+            }
+            if (value !== 0 || values.length === 0) throw new Error('invalid DER object identifier');
+            const first = values.shift();
+            const firstComponent = Math.min(2, Math.floor(first / 40));
+            return [firstComponent, first - firstComponent * 40, ...values].join('.');
+          }
+
+          const extensions = new Map();
+          function walk(start, end) {
+            for (let offset = start; offset < end;) {
+              let value;
+              try {
+                value = readTlv(raw, offset, end);
+              } catch {
+                return;
+              }
+              if (value.tag === 0x30) {
+                try {
+                  const parts = children(value.contentStart, value.end);
+                  if (parts[0]?.tag === 0x06) {
+                    const oid = decodeOid(raw.subarray(parts[0].contentStart, parts[0].end));
+                    const valueIndex = parts[1]?.tag === 0x01 ? 2 : 1;
+                    if (parts[valueIndex]?.tag === 0x04 && oid.startsWith('1.3.6.1.4.1.57264.1.')) {
+                      const octet = parts[valueIndex];
+                      const inner = readTlv(raw, octet.contentStart, octet.end);
+                      if (inner.end !== octet.end) throw new Error('trailing extension bytes');
+                      extensions.set(oid, raw.subarray(inner.contentStart, inner.end).toString('utf8'));
+                    }
+                  }
+                } catch {
+                  // Not every DER sequence is an X.509 Extension sequence.
+                }
+              }
+              if ((value.tag & 0x20) !== 0) walk(value.contentStart, value.end);
+              offset = value.end;
+            }
+          }
+          walk(0, raw.length);
+
+          const expected = new Map([
+            ['1.3.6.1.4.1.57264.1.9', workflowRef],
+            ['1.3.6.1.4.1.57264.1.10', sha],
+            ['1.3.6.1.4.1.57264.1.11', 'github-hosted'],
+            ['1.3.6.1.4.1.57264.1.12', repository],
+            ['1.3.6.1.4.1.57264.1.13', sha],
+            ['1.3.6.1.4.1.57264.1.14', tag],
+            ['1.3.6.1.4.1.57264.1.18', workflowRef],
+            ['1.3.6.1.4.1.57264.1.19', sha],
+            ['1.3.6.1.4.1.57264.1.20', 'push'],
+            ['1.3.6.1.4.1.57264.1.22', 'public'],
+            ['1.3.6.1.4.1.57264.1.23', 'release'],
+            ['1.3.6.1.4.1.57264.1.24', subject],
+          ]);
+          if (certificate.subjectAltName !== `URI:${workflowRef}`) throw new Error('unexpected certificate identity');
+          for (const [oid, expectedValue] of expected) {
+            if (extensions.get(oid) !== expectedValue) throw new Error(`unexpected certificate extension ${oid}`);
+          }
+          const invocation = extensions.get('1.3.6.1.4.1.57264.1.21') ?? '';
+          if (!invocation.startsWith(invocationPrefix) || !/^[1-9][0-9]*$/.test(invocation.slice(invocationPrefix.length))) {
+            throw new Error('unexpected certificate workflow invocation');
+          }
+          NODE
+          jq -r --arg version "$VERSION" '
+            .verified[] |
+            select(.name == "postshow" and .version == $version and .registry == "https://registry.npmjs.org/") |
+            .attestationBundles[] |
+            select(.predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1") |
+            .bundle.dsseEnvelope.payload
+          ' "$audit_json" | base64 --decode > "$provenance_dir/publish-statement.json"
+          jq -e \
+            --arg digest "$local_sha512" \
+            --arg purl "pkg:npm/postshow@${VERSION}" \
+            --arg version "$VERSION" '
+            ._type == "https://in-toto.io/Statement/v0.1" and
+            .predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1" and
+            (.subject | length) == 1 and
+            .subject[0].name == $purl and
+            .subject[0].digest.sha512 == $digest and
+            .predicate.name == "postshow" and
+            .predicate.version == $version and
+            .predicate.registry == "https://registry.npmjs.org"
+          ' "$provenance_dir/publish-statement.json" >/dev/null || {
+            echo 'Verified npm publish attestation is not bound to the exact package and tarball' >&2
+            exit 1
+          }
+
+          if [[ "$NPM_PUBLISH_MODE" == bootstrap ]]; then
+            # Bootstrap publishes under an isolated temporary tag. Only after
+            # signature/provenance verification may its one-time token create
+            # latest and remove that tag. Trusted OIDC mode never uses dist-tag
+            # mutations: npm publish atomically creates the new latest.
+            latest_packument="$RUNNER_TEMP/npm-immediately-before-latest.json"
+            curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              'https://registry.npmjs.org/postshow' > "$latest_packument"
+            current_latest="$(jq -r '.["dist-tags"].latest // empty' "$latest_packument")"
+            should_advance_latest=false
+            if [[ -z "$current_latest" ]]; then
+              should_advance_latest=true
+            else
+              if [[ ! "$current_latest" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                echo "npm latest is not a stable semantic version: ${current_latest}" >&2
+                exit 1
+              fi
+              node - "$VERSION" "$current_latest" <<'NODE' && should_advance_latest=true || true
+          const [candidate, latest] = process.argv.slice(2).map((value) => value.split('.').map(BigInt));
+          for (let index = 0; index < 3; index += 1) {
+            if (candidate[index] > latest[index]) process.exit(0);
+            if (candidate[index] < latest[index]) process.exit(1);
+          }
+          process.exit(1);
+          NODE
+            fi
+            if [[ "$should_advance_latest" == true ]]; then
+              assert_release_guards
+              assert_npm_identity
+              NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" \
+                npm dist-tag add "postshow@${VERSION}" latest --registry=https://registry.npmjs.org
+            fi
+
+            cleanup_packument="$RUNNER_TEMP/npm-before-temp-tag-cleanup.json"
+            curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              'https://registry.npmjs.org/postshow' > "$cleanup_packument"
+            temporary_version="$(jq -r --arg tag "$temporary_tag" '.["dist-tags"][$tag] // empty' "$cleanup_packument")"
+            if [[ -n "$temporary_version" && "$temporary_version" != "$VERSION" ]]; then
+              echo "Temporary dist-tag ${temporary_tag} unexpectedly names ${temporary_version}" >&2
+              exit 1
+            fi
+            if [[ "$temporary_version" == "$VERSION" ]]; then
+              assert_release_guards
+              assert_npm_identity
+              NODE_AUTH_TOKEN="$NPM_BOOTSTRAP_TOKEN" \
+                npm dist-tag rm postshow "$temporary_tag" --registry=https://registry.npmjs.org
+            fi
+          else
+            trusted_temp_packument="$RUNNER_TEMP/npm-trusted-temp-tag-check.json"
+            curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              'https://registry.npmjs.org/postshow' > "$trusted_temp_packument"
+            temporary_version="$(jq -r --arg tag "$temporary_tag" '.["dist-tags"][$tag] // empty' "$trusted_temp_packument")"
+            if [[ -n "$temporary_version" ]]; then
+              echo "Trusted publication refuses unexpected temporary dist-tag ${temporary_tag}" >&2
+              exit 1
+            fi
+          fi
+
+          final_packument="$RUNNER_TEMP/npm-after-reconciliation.json"
+          curl --fail --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            -H 'Cache-Control: no-cache' \
+            'https://registry.npmjs.org/postshow' > "$final_packument"
+          expected_latest="$(jq -r '.["dist-tags"].latest // empty' "$final_packument")"
+          final_temporary="$(jq -r --arg tag "$temporary_tag" '.["dist-tags"][$tag] // empty' "$final_packument")"
+          if [[ -z "$expected_latest" || -n "$final_temporary" ]]; then
+            echo 'npm latest or temporary-tag state is inconsistent after reconciliation' >&2
+            exit 1
+          fi
+          if [[ ! "$expected_latest" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "npm latest is not a stable semantic version: ${expected_latest}" >&2
+            exit 1
+          fi
+          node - "$expected_latest" "$VERSION" <<'NODE'
+          const [latest, candidate] = process.argv.slice(2).map((value) => value.split('.').map(BigInt));
+          for (let index = 0; index < 3; index += 1) {
+            if (latest[index] > candidate[index]) process.exit(0);
+            if (latest[index] < candidate[index]) process.exit(1);
+          }
+          NODE
+          echo "expected_latest=${expected_latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Read back npm integrity, latest tag, provenance, owner, access, and temporary-tag cleanup
+        shell: bash
+        env:
+          EXPECTED_LATEST: ${{ steps.npm_publish.outputs.expected_latest }}
+          NPM_PUBLISHER: ${{ vars.NPM_PUBLISHER }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="release/postshow-${VERSION}.tgz"
+          local_integrity="sha512-$(openssl dgst -sha512 -binary "$tarball" | openssl base64 -A)"
+          temporary_tag="release-${VERSION//./-}"
+          verified=false
+          for attempt in $(seq 1 12); do
+            packument="$RUNNER_TEMP/npm-after-publish-${attempt}.json"
+            status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 \
+              -H 'Cache-Control: no-cache' \
+              --output "$packument" --write-out '%{http_code}' \
+              'https://registry.npmjs.org/postshow' || true)"
+            if [[ "$status" == 200 ]]; then
+              remote_integrity="$(jq -r --arg version "$VERSION" '.versions[$version].dist.integrity // empty' "$packument")"
+              current_latest="$(jq -r '.["dist-tags"].latest // empty' "$packument")"
+              temporary_version="$(jq -r --arg tag "$temporary_tag" '.["dist-tags"][$tag] // empty' "$packument")"
+              attestation_url="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.url // empty' "$packument")"
+              predicate="$(jq -r --arg version "$VERSION" '.versions[$version].dist.attestations.provenance.predicateType // empty' "$packument")"
+              if [[
+                "$remote_integrity" == "$local_integrity" &&
+                "$current_latest" == "$EXPECTED_LATEST" &&
+                -z "$temporary_version" &&
+                "$attestation_url" == "https://registry.npmjs.org/-/npm/v1/attestations/postshow@${VERSION}" &&
+                "$predicate" == 'https://slsa.dev/provenance/v1'
+              ]]; then
+                attestations="$RUNNER_TEMP/npm-attestations.json"
+                if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+                  -H 'Cache-Control: no-cache' \
+                  "$attestation_url" > "$attestations" &&
+                  jq -e '
+                    any(.attestations[]?; .predicateType == "https://slsa.dev/provenance/v1") and
+                    any(.attestations[]?; .predicateType == "https://github.com/npm/attestation/tree/main/specs/publish/v0.1")
+                  ' "$attestations" >/dev/null; then
+                  verified=true
+                  break
+                fi
+              fi
+            fi
+            sleep 5
+          done
+          if [[ "$verified" != true ]]; then
+            echo 'npm did not expose exact integrity, expected latest, temporary-tag cleanup, and both attestations in time' >&2
+            exit 1
+          fi
+
+          ownership_verified=false
+          for _ in $(seq 1 12); do
+            owners="$(npm owner ls postshow --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            owner_logins="$(awk 'NF { print $1 }' <<<"$owners" | LC_ALL=C sort -u)"
+            access="$(npm access get status postshow --json --registry=https://registry.npmjs.org 2>/dev/null || true)"
+            if [[ "$owner_logins" == "$NPM_PUBLISHER" ]] &&
+              jq -e '.postshow == "public"' <<<"$access" >/dev/null 2>&1; then
+              ownership_verified=true
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$ownership_verified" != true ]]; then
+            echo "npm did not expose expected owner ${NPM_PUBLISHER} and public access in time" >&2
+            exit 1
+          fi
+
+      - name: Publish or reconcile and verify the GitHub release
+        shell: bash
+        env:
+          ALREADY_PUBLIC: ${{ steps.github_release.outputs.already_public }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ADMIN_READ_TOKEN: ${{ secrets.RELEASE_ADMIN_READ_TOKEN }}
+          RELEASE_ID: ${{ steps.github_release.outputs.release_id }}
+          STABLE_TAG_CREATION_RULESET_ID: ${{ vars.STABLE_TAG_CREATION_RULESET_ID }}
+          STABLE_TAG_IMMUTABILITY_RULESET_ID: ${{ vars.STABLE_TAG_IMMUTABILITY_RULESET_ID }}
+          STABLE_TAG_BYPASS_TEAM_ID: ${{ vars.STABLE_TAG_BYPASS_TEAM_ID }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo 'The staged release did not expose a valid numeric ID' >&2
+            exit 1
+          fi
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
+          while IFS= read -r name; do
+            hash="$(sha256sum "release/$name" | awk '{ print $1 }')"
+            printf '%s\tsha256:%s\n' "$name" "$hash"
+          done < expected-assets.txt > expected-digests.txt
+
+          exact_release="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          jq -e --arg tag "$TAG" --argjson release_id "$RELEASE_ID" '
+            .id == $release_id and
+            .tag_name == $tag and
+            .prerelease == false and
+            .author.login == "github-actions[bot]" and
+            .author.type == "Bot" and
+            .discussion_url == null and
+            all(.assets[]?; .uploader.login == "github-actions[bot]" and .uploader.type == "Bot")
+          ' <<<"$exact_release" >/dev/null
+          case "$ALREADY_PUBLIC" in
+            true)
+              jq -e '.draft == false and .immutable == true' <<<"$exact_release" >/dev/null || {
+                echo 'The previously public release is not immutable' >&2
+                exit 1
+              }
+              ;;
+            false)
+              jq -e '.draft == true' <<<"$exact_release" >/dev/null || {
+                echo 'The exact staged release is no longer a draft' >&2
+                exit 1
+              }
+              ;;
+            *)
+              echo 'The draft-staging job returned an invalid release state' >&2
+              exit 1
+              ;;
+          esac
+          jq -r '.assets[].name' <<<"$exact_release" | sort > prepublish-assets.txt
+          diff -u expected-assets.txt prepublish-assets.txt
+          jq -r '.assets[] | [.name, .digest] | @tsv' <<<"$exact_release" | sort > prepublish-digests.txt
+          diff -u expected-digests.txt prepublish-digests.txt
+
+          # npm publication can take long enough for external state to drift.
+          # Re-download every staged byte and verify the manifest again before
+          # the irreversible draft-to-public transition.
+          mkdir prepublish-download
+          gh release download "$TAG" --dir prepublish-download
+          cmp release/SHA256SUMS.txt prepublish-download/SHA256SUMS.txt
+          (cd prepublish-download && sha256sum -c SHA256SUMS.txt)
+
+          latest_json="$RUNNER_TEMP/github-latest-before-publish.json"
+          status="$(curl --silent --show-error --retry 3 --connect-timeout 10 --max-time 30 \
+            --output "$latest_json" --write-out '%{http_code}' \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest")"
+          comparison=1
+          if [[ "$status" == 200 ]]; then
+            latest_tag="$(jq -r .tag_name "$latest_json")"
+            if [[ ! "$latest_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "GitHub latest is not a stable vX.Y.Z release: ${latest_tag}" >&2
+              exit 1
+            fi
+            comparison="$(node - "${TAG#v}" "${latest_tag#v}" <<'NODE'
+          const [candidate, latest] = process.argv.slice(2).map((value) => value.split('.').map(BigInt));
+          for (let index = 0; index < 3; index += 1) {
+            if (candidate[index] > latest[index]) { console.log('1'); process.exit(0); }
+            if (candidate[index] < latest[index]) { console.log('-1'); process.exit(0); }
+          }
+          console.log('0');
+          NODE
+            )"
+          elif [[ "$status" != 404 ]]; then
+            echo "Unexpected anonymous GitHub latest-release response immediately before publication: HTTP ${status}" >&2
+            exit 1
+          fi
+          if [[ "$ALREADY_PUBLIC" == true ]] && (( comparison > 0 )); then
+            echo 'The immutable public candidate is newer than GitHub latest and cannot be safely re-promoted' >&2
+            exit 1
+          fi
+
+          legacy_workflow="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874")"
+          jq -e '
+            .id == 316997874 and
+            .path == ".github/workflows/release.yml" and
+            .state == "disabled_manually"
+          ' <<<"$legacy_workflow" >/dev/null || {
+            echo 'Historical Release workflow was re-enabled before GitHub publication' >&2
+            exit 1
+          }
+          legacy_runs="$(gh api --paginate --slurp \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874/runs?per_page=100")"
+          jq -e 'all(.[]?.workflow_runs[]?; .status == "completed")' <<<"$legacy_runs" >/dev/null || {
+            echo 'Historical Release workflow still has a queued or running execution before GitHub publication' >&2
+            exit 1
+          }
+          tag_creation_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_CREATION_RULESET_ID}")"
+          jq -e --argjson team_id "$STABLE_TAG_BYPASS_TEAM_ID" '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            (.bypass_actors | length) == 1 and
+            .bypass_actors[0].actor_type == "Team" and
+            .bypass_actors[0].actor_id == $team_id and
+            .bypass_actors[0].bypass_mode == "always" and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "creation") and
+            all(.rules[]?; .type != "update" and .type != "deletion")
+          ' <<<"$tag_creation_ruleset" >/dev/null
+          tag_immutability_ruleset="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/rulesets/${STABLE_TAG_IMMUTABILITY_RULESET_ID}")"
+          jq -e '
+            .enforcement == "active" and
+            .target == "tag" and
+            has("bypass_actors") and
+            (.bypass_actors | type) == "array" and
+            .bypass_actors == [] and
+            (.conditions.ref_name.include // []) == ["refs/tags/v*"] and
+            (.conditions.ref_name.exclude // []) == [] and
+            any(.rules[]?; .type == "update") and
+            any(.rules[]?; .type == "deletion") and
+            all(.rules[]?; .type != "creation")
+          ' <<<"$tag_immutability_ruleset" >/dev/null
+          immutable_releases="$(GH_TOKEN="$RELEASE_ADMIN_READ_TOKEN" gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/immutable-releases")"
+          jq -e '.enabled == true' <<<"$immutable_releases" >/dev/null || {
+            echo 'Repository immutable releases were disabled before GitHub publication' >&2
+            exit 1
+          }
+
+          # Bind the final mutation to the same release ID, exact asset set,
+          # stable tag, and still-protected tag ref checked above.
+          exact_release="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          jq -e --arg tag "$TAG" --argjson release_id "$RELEASE_ID" \
+            --argjson already_public "$ALREADY_PUBLIC" '
+            .id == $release_id and
+            .tag_name == $tag and
+            .prerelease == false and
+            (if $already_public then (.draft == false and .immutable == true) else .draft == true end)
+          ' <<<"$exact_release" >/dev/null
+          jq -r '.assets[].name' <<<"$exact_release" | sort > final-assets.txt
+          diff -u expected-assets.txt final-assets.txt
+          jq -r '.assets[] | [.name, .digest] | @tsv' <<<"$exact_release" | sort > final-digests.txt
+          diff -u expected-digests.txt final-digests.txt
+          remote_tag_sha="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/commits/${TAG}" --jq .sha)"
+          if [[ "$remote_tag_sha" != "$GITHUB_SHA" ]]; then
+            echo "Remote ${TAG} moved before GitHub publication" >&2
+            exit 1
+          fi
+
+          # Generate release notes from the protected tag and an explicit
+          # highest lower stable release. The exact safe name and generated
+          # body are included in the same request that makes the draft public.
+          release_pages="$RUNNER_TEMP/public-release-pages.json"
+          gh api --paginate --slurp \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases?per_page=100" > "$release_pages"
+          previous_tag="$(node - "$release_pages" "$TAG" <<'NODE'
+          const fs = require('node:fs');
+          const [path, candidateTag] = process.argv.slice(2);
+          const stable = /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+          const values = (tag) => stable.exec(tag).slice(1).map(BigInt);
+          const compare = (left, right) => {
+            const a = values(left);
+            const b = values(right);
+            for (let index = 0; index < 3; index += 1) {
+              if (a[index] > b[index]) return 1;
+              if (a[index] < b[index]) return -1;
+            }
+            return 0;
+          };
+          if (!stable.test(candidateTag)) process.exit(2);
+          const releases = JSON.parse(fs.readFileSync(path, 'utf8')).flat();
+          const candidates = releases
+            .filter((release) => release.draft === false && release.prerelease === false)
+            .map((release) => release.tag_name)
+            .filter((tag) => stable.test(tag) && compare(tag, candidateTag) < 0)
+            .sort(compare);
+          console.log(candidates.at(-1) ?? '');
+          NODE
+          )"
+          notes_request="$RUNNER_TEMP/generated-notes-request.json"
+          jq -n --arg tag "$TAG" --arg target "$GITHUB_SHA" \
+            '{tag_name:$tag, target_commitish:$target}' > "$notes_request"
+          if [[ -n "$previous_tag" ]]; then
+            jq --arg previous "$previous_tag" '. + {previous_tag_name:$previous}' \
+              "$notes_request" > "$notes_request.next"
+            mv "$notes_request.next" "$notes_request"
+          fi
+          generated_notes="$RUNNER_TEMP/generated-release-notes.json"
+          gh api --method POST \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            --input "$notes_request" > "$generated_notes"
+          jq -e '.body | type == "string"' "$generated_notes" >/dev/null
+          expected_name="Postshow ${TAG#v}"
+
+          # Disabling the legacy workflow prevents new executions. Rechecking
+          # every historical run immediately before PATCH closes the queued-run
+          # handoff race as well.
+          legacy_runs="$(gh api --paginate --slurp \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/316997874/runs?per_page=100")"
+          jq -e 'all(.[]?.workflow_runs[]?; .status == "completed")' <<<"$legacy_runs" >/dev/null || {
+            echo 'Historical Release workflow became active before the final GitHub mutation' >&2
+            exit 1
+          }
+          if [[ "$ALREADY_PUBLIC" == false ]]; then
+            release_payload="$RUNNER_TEMP/release-publication.json"
+            jq --arg name "$expected_name" \
+              '{name:$name, body:.body, draft:false, prerelease:false, make_latest:"legacy"}' \
+              "$generated_notes" > "$release_payload"
+            gh api --method PATCH \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+              --input "$release_payload" >/dev/null
+          fi
+          release_json="$(gh api \
+            -H 'Cache-Control: no-cache' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
+          jq -e --arg tag "$TAG" --arg name "$expected_name" --argjson release_id "$RELEASE_ID" \
+            --slurpfile notes "$generated_notes" '
+            .id == $release_id and
+            .tag_name == $tag and
+            .name == $name and
+            .body == $notes[0].body and
+            .draft == false and
+            .prerelease == false and
+            .immutable == true and
+            .author.login == "github-actions[bot]" and
+            .author.type == "Bot" and
+            .discussion_url == null and
+            all(.assets[]?; .uploader.login == "github-actions[bot]" and .uploader.type == "Bot")
+          ' <<<"$release_json" >/dev/null || {
+            echo 'The exact release did not become public, immutable, and bound to trusted notes' >&2
+            exit 1
+          }
+          jq -r '.assets[].name' <<<"$release_json" | sort > published-assets.txt
+          diff -u expected-assets.txt published-assets.txt
+          jq -r '.assets[] | [.name, .digest] | @tsv' <<<"$release_json" | sort > published-digests.txt
+          diff -u expected-digests.txt published-digests.txt
+
+      - name: Verify the public release and updater feed without authentication
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          exact_json="$RUNNER_TEMP/anonymous-exact-release.json"
+          visible=false
+          for _ in $(seq 1 12); do
+            if curl --fail --silent --show-error --connect-timeout 10 --max-time 30 \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "${api}/releases/tags/${TAG}" > "$exact_json" &&
+              jq -e --arg tag "$TAG" \
+                '.tag_name == $tag and .draft == false and .prerelease == false and .immutable == true' \
+                "$exact_json" >/dev/null; then
+              visible=true
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$visible" != true ]]; then
+            echo 'The exact GitHub release was not anonymously visible in time' >&2
+            exit 1
+          fi
+
+          find release -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
+          while IFS= read -r name; do
+            hash="$(sha256sum "release/$name" | awk '{ print $1 }')"
+            printf '%s\tsha256:%s\n' "$name" "$hash"
+          done < expected-assets.txt > expected-digests.txt
+          jq -r '.assets[].name' "$exact_json" | sort > anonymous-assets.txt
+          diff -u expected-assets.txt anonymous-assets.txt
+          jq -r '.assets[] | [.name, .digest] | @tsv' "$exact_json" | sort > anonymous-digests.txt
+          diff -u expected-digests.txt anonymous-digests.txt
+          mkdir anonymous-download
+          while IFS= read -r name; do
+            url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .browser_download_url' "$exact_json")"
+            [[ "$url" == "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}" ]]
+            curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+              --connect-timeout 10 --max-time 300 "$url" -o "anonymous-download/$name"
+          done < expected-assets.txt
+          cmp release/SHA256SUMS.txt anonymous-download/SHA256SUMS.txt
+          (cd anonymous-download && sha256sum -c SHA256SUMS.txt)
+
+          latest_json="$RUNNER_TEMP/anonymous-latest-release.json"
+          curl --fail --silent --show-error --retry 6 --retry-all-errors \
+            --connect-timeout 10 --max-time 30 \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "${api}/releases/latest" > "$latest_json"
+          latest_tag="$(jq -r .tag_name "$latest_json")"
+          [[ "$latest_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          node - "${latest_tag#v}" "$VERSION" <<'NODE'
+          const [latest, candidate] = process.argv.slice(2).map((value) => value.split('.').map(BigInt));
+          for (let index = 0; index < 3; index += 1) {
+            if (latest[index] > candidate[index]) process.exit(0);
+            if (latest[index] < candidate[index]) process.exit(1);
+          }
+          NODE
+
+          latest_version="${latest_tag#v}"
+          for metadata in latest.yml latest-mac.yml; do
+            metadata_url="$(jq -r --arg name "$metadata" '.assets[] | select(.name == $name) | .browser_download_url' "$latest_json")"
+            [[ "$metadata_url" == "https://github.com/${GITHUB_REPOSITORY}/releases/download/${latest_tag}/${metadata}" ]]
+            curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+              --connect-timeout 10 --max-time 60 "$metadata_url" -o "$RUNNER_TEMP/$metadata"
+            grep -Fx "version: ${latest_version}" "$RUNNER_TEMP/$metadata"
+            while IFS= read -r asset; do
+              asset_url="$(jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .browser_download_url' "$latest_json")"
+              [[ "$asset_url" == "https://github.com/${GITHUB_REPOSITORY}/releases/download/${latest_tag}/${asset}" ]]
+              curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+                --connect-timeout 10 --max-time 300 "$asset_url" -o /dev/null
+              blockmap="${asset}.blockmap"
+              blockmap_url="$(jq -r --arg name "$blockmap" '.assets[] | select(.name == $name) | .browser_download_url' "$latest_json")"
+              [[ "$blockmap_url" == "https://github.com/${GITHUB_REPOSITORY}/releases/download/${latest_tag}/${blockmap}" ]]
+              curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+                --connect-timeout 10 --max-time 60 "$blockmap_url" -o /dev/null
+            done < <(awk '/^[[:space:]]*- url: / { sub(/^[[:space:]]*- url: /, ""); print }' "$RUNNER_TEMP/$metadata")
+          done

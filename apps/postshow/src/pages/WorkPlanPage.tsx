@@ -1,8 +1,17 @@
-import { useCallback, useState, type FormEvent } from 'react';
-import { describeCadence } from '@eventools/postshow-core';
+import { useCallback, useRef, useState, type FormEvent } from 'react';
+import { describeCadence, normalizePlanId } from '@eventools/postshow-core';
 import { useWorkspace } from '@/state/WorkspaceContext';
-import { createJob, fetchJobs, fetchRuns, decideJob, runJobNow, updateJobCadence } from '@/lib/api';
+import {
+  createJob,
+  fetchJobs,
+  fetchRuns,
+  fetchWorkspacePermissions,
+  decideJob,
+  runJobNow,
+  updateJobCadence,
+} from '@/lib/api';
 import { usePageData } from '@/lib/usePageData';
+import { clearIdempotencyKey, idempotencyKey } from '@/lib/idempotency';
 import { PageHeader, LoadingRow, ErrorRow, Section } from '@/components/page';
 import { track } from '@/lib/analytics';
 import type { Job, Run } from '@/lib/types';
@@ -14,51 +23,78 @@ const CADENCES: { minutes: number; label: string }[] = [
   { minutes: 10080, label: 'weekly' },
 ];
 
-function JobRow({ job, onChanged }: { job: Job; onChanged: () => void }) {
+function JobRow({
+  actorId,
+  workspaceId,
+  job,
+  canOperate,
+  isCurrentContext,
+  onChanged,
+}: {
+  actorId: string;
+  workspaceId: string;
+  job: Job;
+  canOperate: boolean;
+  isCurrentContext: () => boolean;
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showLocalHandoff, setShowLocalHandoff] = useState(false);
 
   async function decide(action: 'approve' | 'veto' | 'pause' | 'resume') {
-    if (busy) return;
+    if (busy || !canOperate || job.workspace_id !== workspaceId || !isCurrentContext()) return;
     setBusy(true);
     setError('');
     try {
       await decideJob(job.id, action);
+      if (!isCurrentContext()) return;
       track(`job_${action}`);
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update the job.');
-      setBusy(false);
+      if (isCurrentContext()) {
+        setError(e instanceof Error ? e.message : 'Could not update the job.');
+      }
+    } finally {
+      if (isCurrentContext()) setBusy(false);
     }
   }
 
   async function reschedule(minutes: number) {
-    if (busy) return;
+    if (busy || !canOperate || job.workspace_id !== workspaceId || !isCurrentContext()) return;
     setBusy(true);
     setError('');
     try {
       await updateJobCadence(job.id, minutes);
+      if (!isCurrentContext()) return;
       track('job_cadence_changed', { minutes });
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not change the cadence.');
-      setBusy(false);
+      if (isCurrentContext()) {
+        setError(e instanceof Error ? e.message : 'Could not change the cadence.');
+      }
+    } finally {
+      if (isCurrentContext()) setBusy(false);
     }
   }
 
   async function runNow() {
-    if (busy) return;
+    if (busy || !canOperate || !actorId || job.workspace_id !== workspaceId) return;
+    const scope = `${actorId}.${workspaceId}.job-run.${job.id}`;
     setBusy(true);
     setError('');
     try {
-      const result = await runJobNow(job.id);
-      if (!result.ok) throw new Error(result.detail || 'The run failed to start.');
+      await runJobNow(job.id, idempotencyKey(scope));
+      clearIdempotencyKey(scope);
+      if (!isCurrentContext()) return;
       track('job_run_now');
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not start the run.');
+      if (isCurrentContext()) {
+        setError(e instanceof Error ? e.message : 'Could not start the run.');
+      }
     } finally {
-      setBusy(false);
+      if (isCurrentContext()) setBusy(false);
     }
   }
 
@@ -100,49 +136,62 @@ function JobRow({ job, onChanged }: { job: Job; onChanged: () => void }) {
             </p>
           )}
         </div>
-        <div className="flex shrink-0 gap-2">
-          {proposed ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void decide('approve')}
-                disabled={busy}
-                className="ps-btn-primary"
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                onClick={() => void decide('veto')}
-                disabled={busy}
-                className="ps-btn-ghost"
-              >
-                Veto
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => void runNow()}
-                disabled={busy || paused}
-                className="ps-btn-primary"
-              >
-                {busy ? 'Working…' : 'Run now'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void decide(paused ? 'resume' : 'pause')}
-                disabled={busy}
-                className="ps-btn-ghost"
-              >
-                {paused ? 'Resume' : 'Pause'}
-              </button>
-            </>
-          )}
-        </div>
+        {canOperate ? (
+          <div className="flex shrink-0 gap-2">
+            {proposed ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void decide('approve')}
+                  disabled={busy}
+                  className="ps-btn-primary"
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void decide('veto')}
+                  disabled={busy}
+                  className="ps-btn-ghost"
+                >
+                  Veto
+                </button>
+              </>
+            ) : (
+              <>
+                {job.runtime === 'local' ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowLocalHandoff(true)}
+                    disabled={busy || paused}
+                    className="ps-btn-primary"
+                  >
+                    Run on device
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void runNow()}
+                    disabled={busy || paused}
+                    className="ps-btn-primary"
+                  >
+                    {busy ? 'Working…' : 'Run now'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void decide(paused ? 'resume' : 'pause')}
+                  disabled={busy}
+                  className="ps-btn-ghost"
+                >
+                  {paused ? 'Resume' : 'Pause'}
+                </button>
+              </>
+            )}
+          </div>
+        ) : null}
       </div>
-      {!proposed && (
+      {!proposed && canOperate ? (
         <div className="flex flex-wrap items-center gap-1">
           <span className="mr-1 font-public-mono text-[10px] uppercase tracking-[0.12em] text-night-fg-3">
             cadence
@@ -168,7 +217,25 @@ function JobRow({ job, onChanged }: { job: Job; onChanged: () => void }) {
             );
           })}
         </div>
-      )}
+      ) : null}
+      {showLocalHandoff ? (
+        <div className="rounded-sm border border-signal/30 bg-night-2 p-3" role="status">
+          <p className="m-0 font-public-sans text-[12px] leading-[1.55] text-night-fg-2">
+            Local jobs must be claimed by the authenticated device that holds the source
+            credentials. Run:
+          </p>
+          <code className="mt-2 block break-all font-public-mono text-[11px] text-night-fg">
+            npx postshow run --job {job.id}
+          </code>
+          <button
+            type="button"
+            onClick={() => setShowLocalHandoff(false)}
+            className="ps-btn-ghost mt-2"
+          >
+            Close
+          </button>
+        </div>
+      ) : null}
       {error && <ErrorRow message={error} />}
     </li>
   );
@@ -199,34 +266,50 @@ function RunRow({ run }: { run: Run }) {
 
 function NewInvestigation({
   workspaceId,
+  planId,
+  isCurrentContext,
   onCreated,
 }: {
   workspaceId: string;
+  planId: string;
+  isCurrentContext: () => boolean;
   onCreated: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [label, setLabel] = useState('');
   const [question, setQuestion] = useState('');
   const [minutes, setMinutes] = useState(1440);
+  const [runtime, setRuntime] = useState<'cloud' | 'local'>(() =>
+    normalizePlanId(planId) === 'free' ? 'local' : 'cloud'
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !label.trim()) return;
+    if (busy || !label.trim() || !isCurrentContext()) return;
     setBusy(true);
     setError('');
     try {
-      await createJob({ workspaceId, label: label.trim(), question, intervalMinutes: minutes });
-      track('job_created', { minutes });
+      await createJob({
+        workspaceId,
+        label: label.trim(),
+        question,
+        intervalMinutes: minutes,
+        runtime,
+      });
+      if (!isCurrentContext()) return;
+      track('job_created', { minutes, runtime });
       setLabel('');
       setQuestion('');
       setOpen(false);
       onCreated();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the investigation.');
+      if (isCurrentContext()) {
+        setError(e instanceof Error ? e.message : 'Could not create the investigation.');
+      }
     } finally {
-      setBusy(false);
+      if (isCurrentContext()) setBusy(false);
     }
   }
 
@@ -249,6 +332,24 @@ function NewInvestigation({
           placeholder="Why do trials from paid ads stall at onboarding?"
           autoFocus
         />
+      </label>
+      <label className="flex max-w-[320px] flex-col gap-1">
+        <span className="ps-label">Where it runs</span>
+        <select
+          value={runtime}
+          onChange={(event) => setRuntime(event.target.value as 'cloud' | 'local')}
+          className="ps-input"
+        >
+          {normalizePlanId(planId) !== 'free' ? (
+            <option value="cloud">Postshow cloud</option>
+          ) : null}
+          <option value="local">My authenticated device</option>
+        </select>
+        <span className="font-public-sans text-[11px] leading-[1.45] text-night-fg-3">
+          {runtime === 'local'
+            ? 'The job is claimed by your CLI or desktop agent; the browser never receives device credentials.'
+            : 'Postshow runs the job with verified cloud connectors and your plan quota.'}
+        </span>
       </label>
       <label className="flex flex-col gap-1">
         <span className="ps-label">Extra context (optional)</span>
@@ -291,12 +392,25 @@ function NewInvestigation({
 }
 
 export function WorkPlanPage() {
-  const { workspace } = useWorkspace();
+  const { session, workspace } = useWorkspace();
+  const actorId = session?.user.id ?? '';
   const workspaceId = workspace?.id ?? '';
+  const context = `${actorId}:${workspaceId}`;
+  const currentContext = useRef(context);
+  currentContext.current = context;
   const jobsFetcher = useCallback(() => fetchJobs(workspaceId), [workspaceId]);
   const runsFetcher = useCallback(() => fetchRuns(workspaceId), [workspaceId]);
+  const permissionsFetcher = useCallback(
+    () => fetchWorkspacePermissions(workspaceId),
+    [workspaceId]
+  );
   const jobs = usePageData(jobsFetcher);
   const runs = usePageData(runsFetcher);
+  const permissions = usePageData(permissionsFetcher);
+  const permissionsReady =
+    !permissions.loading && !permissions.error && permissions.data?.workspace_id === workspaceId;
+  const canOperate =
+    permissionsReady && permissions.data !== null && permissions.data.operate === true;
 
   const reloadAll = useCallback(() => {
     jobs.reload();
@@ -309,13 +423,47 @@ export function WorkPlanPage() {
         title="Work plan"
         sub="The agent schedules its own work. You hold the veto, and every run is on the record."
       />
-      <NewInvestigation workspaceId={workspaceId} onCreated={reloadAll} />
+      {canOperate ? (
+        <NewInvestigation
+          key={`${actorId}:${workspaceId}`}
+          workspaceId={workspaceId}
+          planId={workspace?.plan ?? 'free'}
+          isCurrentContext={() => currentContext.current === context}
+          onCreated={reloadAll}
+        />
+      ) : null}
+      {permissions.loading ? (
+        <p className="mb-4 font-public-sans text-[12px] text-night-fg-3" role="status">
+          Checking work-plan permissions… Controls remain locked.
+        </p>
+      ) : permissions.error ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3" role="alert">
+          <span className="font-public-sans text-[12px] text-bad">
+            Workspace permissions could not be verified. Work-plan controls remain locked.
+          </span>
+          <button type="button" onClick={permissions.reload} className="ps-btn-ghost">
+            Retry permission check
+          </button>
+        </div>
+      ) : permissionsReady && !canOperate ? (
+        <p className="mb-4 font-public-sans text-[12px] text-night-fg-2">
+          The work plan is read-only for your workspace role.
+        </p>
+      ) : null}
       {jobs.loading && <LoadingRow />}
       {jobs.error && <ErrorRow message={jobs.error} />}
       {(jobs.data ?? []).length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
           {(jobs.data ?? []).map((job) => (
-            <JobRow key={job.id} job={job} onChanged={reloadAll} />
+            <JobRow
+              key={`${actorId}:${workspaceId}:${job.id}`}
+              actorId={actorId}
+              workspaceId={workspaceId}
+              job={job}
+              canOperate={canOperate}
+              isCurrentContext={() => currentContext.current === context}
+              onChanged={reloadAll}
+            />
           ))}
         </ul>
       )}

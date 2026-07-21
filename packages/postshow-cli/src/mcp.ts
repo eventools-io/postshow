@@ -1,17 +1,38 @@
 // `postshow mcp` - the MCP server, stdio transport. Exposes the workspace to
-// coding agents: read the inbox, accounts, field notes, and work plan; approve
-// or skip drafted actions; trigger local runs. Auth is the same personal
+// coding agents: read the inbox, accounts, field notes, and work plan; hand
+// irreversible actions to the authenticated web app; skip drafted actions;
+// trigger local runs. Auth is the same personal
 // access token the CLI uses (config file or POSTSHOW_TOKEN).
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { gateway } from './api';
-import { loadConfig } from './config';
-import { runOnce } from './commands/run';
+import { loadConfig, type CliConfig } from './config';
+import { runOnceDetailed } from './commands/run';
+import { buildInboxReviewUrl, skipInboxItem } from './commands/inbox';
 
 function json(payload: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload, null, 2) }] };
+}
+
+const MCP_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function mcpReviewHandoff(config: Pick<CliConfig, 'workspaceId'>, itemId: string) {
+  if (!MCP_UUID_RE.test(itemId)) throw new Error('a valid inbox item id is required');
+  return {
+    item_id: itemId,
+    review_url: buildInboxReviewUrl(config.workspaceId, itemId),
+    requires_authenticated_browser: true,
+    executed: false,
+  };
+}
+
+export function mcpSkipArgs(itemId: string, actionRevision: number) {
+  if (!MCP_UUID_RE.test(itemId) || !Number.isSafeInteger(actionRevision) || actionRevision < 1) {
+    throw new Error('a valid item id and exact positive action revision are required');
+  }
+  return { item_id: itemId, expected_revision: actionRevision };
 }
 
 export async function runMcpServer(): Promise<number> {
@@ -39,7 +60,7 @@ export async function runMcpServer(): Promise<number> {
     {
       title: 'List inbox items',
       description:
-        'Drafted actions awaiting a human decision: outreach emails, tickets, save plays, expansion flags. Each has evidence and an id usable with approve-action / skip-action.',
+        'Drafted actions awaiting a human decision. Each includes an id and action_revision usable with review-action-in-web or skip-action.',
       inputSchema: {
         state: z.enum(['pending', 'approved', 'skipped']).optional().describe('default pending'),
       },
@@ -49,15 +70,15 @@ export async function runMcpServer(): Promise<number> {
   );
 
   server.registerTool(
-    'approve-action',
+    'review-action-in-web',
     {
-      title: 'Approve an inbox item',
+      title: 'Review an inbox item in Postshow',
       description:
-        'Approve AND execute a drafted action (send the email, file the ticket, adopt the rule). Irreversible once sent; confirm with the human when in doubt.',
-      inputSchema: { item_id: z.string().describe('inbox item id') },
-      annotations: { readOnlyHint: false, idempotentHint: false },
+        'Return a token-free URL for the authenticated Postshow web preview. The MCP server cannot execute irreversible actions.',
+      inputSchema: { item_id: z.string().uuid().describe('inbox item id') },
+      annotations: { readOnlyHint: true, idempotentHint: true },
     },
-    async ({ item_id }) => json(await gateway(config, 'inbox.approve', { item_id }))
+    async ({ item_id }) => json(mcpReviewHandoff(config, item_id))
   );
 
   server.registerTool(
@@ -65,9 +86,16 @@ export async function runMcpServer(): Promise<number> {
     {
       title: 'Skip an inbox item',
       description: 'Decline a drafted action. The agent learns from skips.',
-      inputSchema: { item_id: z.string() },
+      inputSchema: {
+        item_id: z.string().uuid(),
+        action_revision: z.number().int().positive().describe('exact revision from list-inbox'),
+      },
+      annotations: { readOnlyHint: false, idempotentHint: true },
     },
-    async ({ item_id }) => json(await gateway(config, 'inbox.skip', { item_id }))
+    async ({ item_id, action_revision }) => {
+      const args = mcpSkipArgs(item_id, action_revision);
+      return json(await skipInboxItem(config, args.item_id, args.expected_revision));
+    }
   );
 
   server.registerTool(
@@ -125,8 +153,8 @@ export async function runMcpServer(): Promise<number> {
       annotations: { readOnlyHint: false },
     },
     async () => {
-      const code = await runOnce();
-      return json({ ok: code === 0 });
+      const summary = await runOnceDetailed(undefined, undefined, 'mcp');
+      return { ...json(summary), isError: summary.exitCode !== 0 };
     }
   );
 

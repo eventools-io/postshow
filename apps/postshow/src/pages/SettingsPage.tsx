@@ -1,54 +1,51 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import {
   CATALOG,
   EFFORT_LEVELS,
-  PLANS,
   TASK_CLASSES,
   TASK_CLASS_INFO,
-  effectiveQuota,
   getProvider,
-  normalizePlanId,
+  resolveEngineEndpoint,
   resolveTaskEngine,
   type EngineDefaults,
-  type EntitlementOverrides,
 } from '@eventools/postshow-core';
 import { useWorkspace } from '@/state/WorkspaceContext';
 import {
-  addMember,
   createApiToken,
   fetchApiTokens,
   fetchEngine,
-  fetchEntitlements,
   fetchKeyProviders,
-  fetchMembers,
-  fetchUsageSummary,
-  removeMember,
+  fetchWorkspacePermissions,
   revokeApiToken,
   setAgentRules,
   setEngine,
   setEngineKey,
   setTaskPrefs,
-  startCheckout,
 } from '@/lib/api';
 import { usePageData } from '@/lib/usePageData';
 import { PageHeader, ErrorRow, Section } from '@/components/page';
 import { track } from '@/lib/analytics';
 import type {
   ApiToken,
-  WorkspaceMember,
+  ApiTokenCreationResult,
   EngineEffort,
   EngineProvider,
   EngineSettings,
   EngineTaskClass,
   EngineTaskPref,
-  UsageSummaryRow,
 } from '@/lib/types';
+import { BillingSection } from '@/components/settings/BillingSection';
+import { WorkspaceLifecycleSection } from '@/components/settings/WorkspaceLifecycleSection';
+import { AccountDeletionSection } from '@/components/settings/AccountDeletionSection';
+import { MemberManagementSection } from '@/components/settings/MemberManagementSection';
+import { LegalLinks } from '@/components/LegalLinks';
+import { fallbackProvider, providersForMode } from '@/lib/engineProviders';
 
 const MODES: { value: EngineSettings['mode']; label: string; blurb: string }[] = [
   {
     value: 'byok',
     label: 'Your keys',
-    blurb: 'Bring keys for any provider in the catalog. Free forever.',
+    blurb: 'Bring keys for any provider in the catalog. No hosted-model charge.',
   },
   {
     value: 'hosted',
@@ -64,11 +61,12 @@ const MODES: { value: EngineSettings['mode']; label: string; blurb: string }[] =
 
 const KEY_PROVIDERS = CATALOG.filter((p) => p.requiresKey && p.id !== 'compatible');
 
-function providerModels(providerId: string) {
-  return getProvider(providerId)?.models ?? [];
+function providerModels(providerId: string, mode: EngineSettings['mode']) {
+  const models = getProvider(providerId)?.models ?? [];
+  return mode === 'hosted' ? models.filter((model) => model.hostedEligible === true) : models;
 }
 
-function EngineSection({
+export function EngineSection({
   workspaceId,
   engine,
   reload,
@@ -81,9 +79,12 @@ function EngineSection({
   const [provider, setProvider] = useState<EngineProvider>('anthropic');
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [compatibleKey, setCompatibleKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const keysFetcher = useCallback(() => fetchKeyProviders(workspaceId), [workspaceId]);
+  const { data: configuredKeys, reload: reloadKeys } = usePageData(keysFetcher);
 
   useEffect(() => {
     if (!engine) return;
@@ -93,8 +94,52 @@ function EngineSection({
     setBaseUrl(engine.base_url);
   }, [engine]);
 
-  const models = providerModels(provider);
+  const availableProviders = providersForMode(mode);
+  const models = providerModels(provider, mode);
   const needsBaseUrl = provider === 'compatible' || provider === 'ollama';
+  let canonicalBaseUrl = baseUrl.trim();
+  if (needsBaseUrl) {
+    const catalogProvider = getProvider(provider);
+    if (catalogProvider) {
+      try {
+        canonicalBaseUrl = resolveEngineEndpoint(
+          {
+            taskClass: 'narration',
+            mode,
+            provider,
+            model: model.trim(),
+            effort: 'low',
+            baseUrl: canonicalBaseUrl,
+          },
+          catalogProvider
+        );
+      } catch {
+        // Submit surfaces the precise validation error. Keeping the raw value
+        // here also makes an invalid edit require fresh credential binding.
+      }
+    }
+  }
+  const compatibleTargetChanged =
+    provider === 'compatible' &&
+    (engine?.provider !== 'compatible' || engine.base_url !== canonicalBaseUrl);
+  const needsCompatibleKey =
+    mode === 'byok' &&
+    provider === 'compatible' &&
+    (compatibleTargetChanged || !configuredKeys?.includes('compatible'));
+
+  function chooseMode(nextMode: EngineSettings['mode']) {
+    const allowed = providersForMode(nextMode);
+    const nextProvider = allowed.some((candidate) => candidate.id === provider)
+      ? provider
+      : fallbackProvider(nextMode);
+    setMode(nextMode);
+    if (nextProvider !== provider) {
+      setProvider(nextProvider);
+      setModel('');
+      setBaseUrl('');
+      setCompatibleKey('');
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -103,9 +148,49 @@ function EngineSection({
     setError('');
     setSaved(false);
     try {
-      await setEngine({ workspaceId, mode, provider, model, baseUrl, apiKey: null });
+      if (!availableProviders.some((candidate) => candidate.id === provider)) {
+        throw new Error('Choose a provider that supports this engine mode.');
+      }
+      if ((provider === 'compatible' || provider === 'ollama') && !model.trim()) {
+        throw new Error('Enter the exact model id for this endpoint.');
+      }
+      if (provider === 'compatible' && !baseUrl.trim()) {
+        throw new Error('Enter the exact OpenAI-compatible base URL.');
+      }
+      let endpoint = '';
+      if (needsBaseUrl) {
+        const catalogProvider = getProvider(provider);
+        if (!catalogProvider) {
+          throw new Error('Choose a supported engine provider.');
+        }
+        endpoint = resolveEngineEndpoint(
+          {
+            taskClass: 'narration',
+            mode,
+            provider,
+            model: model.trim(),
+            effort: 'low',
+            baseUrl: baseUrl.trim(),
+          },
+          catalogProvider
+        );
+      }
+      if (needsCompatibleKey && !compatibleKey.trim()) {
+        throw new Error('Re-enter the compatible endpoint key for this exact target.');
+      }
+      await setEngine({
+        workspaceId,
+        mode,
+        provider,
+        model: model.trim(),
+        baseUrl: endpoint,
+        apiKey: mode === 'byok' && provider === 'compatible' ? compatibleKey.trim() || null : null,
+      });
       track('engine_saved', { mode, provider });
+      if (needsBaseUrl) setBaseUrl(endpoint);
+      setCompatibleKey('');
       setSaved(true);
+      reloadKeys();
       reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save engine settings.');
@@ -122,7 +207,7 @@ function EngineSection({
             <button
               key={option.value}
               type="button"
-              onClick={() => setMode(option.value)}
+              onClick={() => chooseMode(option.value)}
               aria-pressed={mode === option.value}
               className={[
                 'flex flex-col items-start gap-1 rounded-sm border p-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal',
@@ -149,10 +234,12 @@ function EngineSection({
               onChange={(e) => {
                 setProvider(e.target.value as EngineProvider);
                 setModel('');
+                setBaseUrl('');
+                setCompatibleKey('');
               }}
               className="ps-input"
             >
-              {CATALOG.filter((p) => (mode === 'hosted' ? p.hosted : true)).map((p) => (
+              {availableProviders.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
@@ -181,16 +268,50 @@ function EngineSection({
           </label>
         </div>
         {needsBaseUrl && (
-          <label className="flex flex-col gap-1">
-            <span className="ps-label">Base URL</span>
+          <div className="flex flex-col gap-1">
+            <label htmlFor="postshow-engine-base-url">
+              <span className="ps-label">Base URL</span>
+            </label>
             <input
+              id="postshow-engine-base-url"
+              type="url"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
               className="ps-input"
               placeholder="http://localhost:11434/v1"
+              autoComplete="url"
+              aria-describedby="postshow-engine-base-url-help"
             />
-          </label>
+            <span
+              id="postshow-engine-base-url-help"
+              className="font-public-sans text-[11px] leading-[1.45] text-night-fg-3"
+            >
+              URLs cannot contain credentials, query parameters, or fragments. Local engines must
+              use a loopback HTTP(S) address; remote compatible engines must use public HTTPS.
+            </span>
+          </div>
         )}
+        {mode === 'byok' && provider === 'compatible' ? (
+          <label className="flex flex-col gap-1">
+            <span className="ps-label">
+              Endpoint API key
+              {!needsCompatibleKey && ' (leave blank to keep the current key)'}
+            </span>
+            <input
+              type="password"
+              value={compatibleKey}
+              onChange={(event) => setCompatibleKey(event.target.value)}
+              className="ps-input"
+              autoComplete="off"
+              required={needsCompatibleKey}
+              placeholder={needsCompatibleKey ? 'required for this exact endpoint' : 'replace key'}
+            />
+            <span className="font-public-sans text-[11px] leading-[1.45] text-night-fg-3">
+              Changing the compatible provider or base URL invalidates the old key so credentials
+              cannot be rebound to another host.
+            </span>
+          </label>
+        ) : null}
 
         {error && <ErrorRow message={error} />}
         {saved && (
@@ -206,7 +327,7 @@ function EngineSection({
   );
 }
 
-function TaskMatrixSection({
+export function TaskMatrixSection({
   workspaceId,
   engine,
   reload,
@@ -274,11 +395,18 @@ function TaskMatrixSection({
             const info = TASK_CLASS_INFO[task];
             const pref = prefs[task] ?? {};
             const resolved = resolveTaskEngine(task, defaults, prefs);
-            const models = providerModels(pref.provider ?? resolved.provider);
+            const effectiveMode = pref.mode ?? engine?.mode ?? 'byok';
+            const availableProviders = providersForMode(effectiveMode).filter(
+              (candidate) =>
+                candidate.id !== 'compatible' ||
+                (engine?.provider === 'compatible' && Boolean(engine.base_url))
+            );
+            const selectedProvider = pref.provider ?? resolved.provider;
+            const models = providerModels(selectedProvider, effectiveMode);
             return (
               <div
                 key={task}
-                className="grid gap-2 rounded-sm border border-night-4 p-3 sm:grid-cols-[1.2fr_1fr_1fr_0.7fr]"
+                className="grid gap-2 rounded-sm border border-night-4 p-3 sm:grid-cols-[1.2fr_0.8fr_1fr_1fr_0.7fr]"
               >
                 <div className="flex flex-col gap-0.5">
                   <span className="font-public-sans text-[13px] font-medium text-night-fg">
@@ -293,19 +421,52 @@ function TaskMatrixSection({
                   </span>
                 </div>
                 <label className="flex flex-col gap-1">
+                  <span className="ps-label">Mode</span>
+                  <select
+                    value={pref.mode ?? ''}
+                    onChange={(event) => {
+                      const nextMode = event.target.value as EngineSettings['mode'] | '';
+                      if (!nextMode) {
+                        updatePref(task, {
+                          mode: undefined,
+                          provider: undefined,
+                          model: undefined,
+                        });
+                        return;
+                      }
+                      const inherited = engine?.provider ?? fallbackProvider(nextMode);
+                      const provider = providersForMode(nextMode).some(
+                        (candidate) => candidate.id === inherited
+                      )
+                        ? inherited
+                        : fallbackProvider(nextMode);
+                      updatePref(task, { mode: nextMode, provider, model: undefined });
+                    }}
+                    className="ps-input"
+                  >
+                    <option value="">inherit</option>
+                    {MODES.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
                   <span className="ps-label">Provider</span>
                   <select
                     value={pref.provider ?? ''}
                     onChange={(e) =>
                       updatePref(task, {
                         provider: (e.target.value || undefined) as EngineProvider | undefined,
+                        mode: e.target.value ? effectiveMode : pref.mode,
                         model: undefined,
                       })
                     }
                     className="ps-input"
                   >
                     <option value="">inherit</option>
-                    {CATALOG.map((p) => (
+                    {availableProviders.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.label}
                       </option>
@@ -485,257 +646,11 @@ function KeysSection({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function UsageMeter({ label, used, quota }: { label: string; used: number; quota: number }) {
-  const percent = quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0;
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-baseline justify-between">
-        <span className="font-public-sans text-[13px] text-night-fg">{label}</span>
-        <span className="font-public-mono text-[11px] text-night-fg-2">
-          {used.toLocaleString()} / {quota.toLocaleString()}
-        </span>
-      </div>
-      <div className="h-[6px] w-full overflow-hidden rounded-full bg-night-3" aria-hidden>
-        <div
-          className={percent >= 100 ? 'h-full bg-warn' : 'h-full bg-signal'}
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function PlanSection({ workspaceId, planId }: { workspaceId: string; planId: string }) {
-  const fetcher = useCallback(() => fetchUsageSummary(workspaceId), [workspaceId]);
-  const { data: usage } = usePageData(fetcher);
-  const entitlementsFetcher = useCallback(() => fetchEntitlements(workspaceId), [workspaceId]);
-  const { data: entitlementRow } = usePageData(entitlementsFetcher);
-  const [busyTier, setBusyTier] = useState('');
-  const [error, setError] = useState('');
-
-  const plan = PLANS[normalizePlanId(planId)];
-  const overrides: EntitlementOverrides | null = entitlementRow
-    ? {
-        sessionsWatched: entitlementRow.sessions_watched,
-        deepDives: entitlementRow.deep_dives,
-        investigations: entitlementRow.investigations,
-        seats: entitlementRow.seats,
-        metered: entitlementRow.metered,
-      }
-    : null;
-  const quota = effectiveQuota(plan, overrides);
-  const totals = useMemo(() => {
-    const rows = usage ?? [];
-    const sum = (task: string) =>
-      rows.filter((r: UsageSummaryRow) => r.task_class === task).reduce((a, r) => a + r.units, 0);
-    return {
-      sessions: sum('narration'),
-      deepDives: sum('deep_dive'),
-      investigations: sum('investigation') + sum('drafting'),
-      costUsd: rows.reduce((a, r) => a + r.cost_usd_micros, 0) / 1_000_000,
-    };
-  }, [usage]);
-
-  async function upgrade(tier: 'solo' | 'team') {
-    if (busyTier) return;
-    setBusyTier(tier);
-    setError('');
-    try {
-      const result = await startCheckout(workspaceId, tier);
-      if (result.ok && result.url) {
-        window.location.href = result.url;
-        return;
-      }
-      setError(result.detail ?? 'Checkout is not open yet.');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Checkout failed.');
-    } finally {
-      setBusyTier('');
-    }
-  }
-
-  return (
-    <Section title="Plan and usage">
-      <div className="ps-card flex flex-col gap-4 p-5">
-        <div className="flex items-baseline justify-between">
-          <p className="m-0 font-public-sans text-[14px] font-medium text-night-fg">
-            {plan.label}
-            {plan.priceUsdMonthly ? ` · $${plan.priceUsdMonthly}/mo` : ' · $0'}
-          </p>
-          {plan.hostedModels && totals.costUsd > 0 && (
-            <span className="font-public-mono text-[11px] text-night-fg-3">
-              ~${totals.costUsd.toFixed(2)} model cost this month
-            </span>
-          )}
-        </div>
-        <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
-          {plan.blurb}
-        </p>
-
-        {plan.hostedModels ? (
-          <div className="flex flex-col gap-3">
-            <UsageMeter
-              label="Sessions watched"
-              used={totals.sessions}
-              quota={quota.sessionsWatched}
-            />
-            <UsageMeter label="Deep dives" used={totals.deepDives} quota={quota.deepDives} />
-            <UsageMeter
-              label="Investigations"
-              used={totals.investigations}
-              quota={quota.investigations}
-            />
-            <p className="m-0 font-public-sans text-[12px] leading-[1.5] text-night-fg-3">
-              {quota.metered
-                ? 'This workspace is on custom usage billing: nothing degrades, and usage past the included quota is billed per unit on your agreement.'
-                : 'Over a budget, the agent degrades instead of stopping: sweeps thin their sampling and deep dives wait for next month. Runs with your own keys are never metered.'}
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void upgrade('solo')}
-              disabled={busyTier !== ''}
-              className="ps-btn-primary"
-            >
-              {busyTier === 'solo'
-                ? 'Opening…'
-                : `Upgrade to Solo · $${PLANS.solo.priceUsdMonthly}/mo`}
-            </button>
-            <button
-              type="button"
-              onClick={() => void upgrade('team')}
-              disabled={busyTier !== ''}
-              className="ps-btn-ghost"
-            >
-              {busyTier === 'team' ? 'Opening…' : `Team · $${PLANS.team.priceUsdMonthly}/mo`}
-            </button>
-            <span className="font-public-sans text-[12px] text-night-fg-3">
-              Hosted plans add always-on cloud runs and hosted models.
-            </span>
-          </div>
-        )}
-        {error && <ErrorRow message={error} />}
-      </div>
-    </Section>
-  );
-}
-
-function MembersSection({ workspaceId, planId }: { workspaceId: string; planId: string }) {
-  const fetcher = useCallback(() => fetchMembers(workspaceId), [workspaceId]);
-  const { data: members, reload } = usePageData(fetcher);
-  const entitlementsFetcher = useCallback(() => fetchEntitlements(workspaceId), [workspaceId]);
-  const { data: entitlementRow } = usePageData(entitlementsFetcher);
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  const plan = PLANS[normalizePlanId(planId)];
-  const seats = entitlementRow?.seats ?? plan.seats;
-  const paid = plan.id !== 'free';
-  const used = (members ?? []).length;
-
-  async function invite() {
-    const value = email.trim();
-    if (!value || busy) return;
-    setBusy(true);
-    setError('');
-    try {
-      await addMember(workspaceId, value);
-      track('member_added', {});
-      setEmail('');
-      reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not add the member.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function drop(userId: string) {
-    setError('');
-    try {
-      await removeMember(workspaceId, userId);
-      reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not remove the member.');
-    }
-  }
-
-  return (
-    <Section title="Members">
-      <div className="ps-card flex flex-col gap-3 p-5">
-        <div className="flex items-baseline justify-between">
-          <p className="m-0 font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
-            {paid
-              ? 'Everyone here shares the inbox, dossiers, and work plan.'
-              : 'Seats come with the paid plans. The free plan is single-member.'}
-          </p>
-          <span className="font-public-mono text-[11px] text-night-fg-3">
-            {used} / {seats} seat{seats === 1 ? '' : 's'}
-          </span>
-        </div>
-
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {(members ?? []).map((member: WorkspaceMember) => (
-            <li
-              key={member.user_id}
-              className="flex items-center justify-between gap-2 border-t border-night-4 pt-2 first:border-t-0 first:pt-0"
-            >
-              <span className="min-w-0 truncate font-public-sans text-[13px] text-night-fg">
-                {member.email}
-                <span className="ml-2 font-public-mono text-[10px] uppercase tracking-[0.1em] text-night-fg-3">
-                  {member.role}
-                </span>
-              </span>
-              {member.role !== 'owner' && (
-                <button
-                  type="button"
-                  onClick={() => void drop(member.user_id)}
-                  className="ps-btn-ghost"
-                >
-                  Remove
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-
-        {paid && used < seats && (
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="ps-input max-w-[260px]"
-              placeholder="teammate@company.com"
-              aria-label="Teammate email"
-              autoComplete="off"
-            />
-            <button
-              type="button"
-              onClick={() => void invite()}
-              disabled={busy || !email.trim()}
-              className="ps-btn-primary"
-            >
-              {busy ? 'Adding…' : 'Add member'}
-            </button>
-            <span className="font-public-sans text-[12px] text-night-fg-3">
-              They need a Postshow account with this email first.
-            </span>
-          </div>
-        )}
-        {error && <ErrorRow message={error} />}
-      </div>
-    </Section>
-  );
-}
-
 function TokensSection({ workspaceId }: { workspaceId: string }) {
   const fetcher = useCallback(() => fetchApiTokens(workspaceId), [workspaceId]);
   const { data: tokens, reload } = usePageData(fetcher);
   const [name, setName] = useState('');
-  const [minted, setMinted] = useState('');
+  const [minted, setMinted] = useState<ApiTokenCreationResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
@@ -743,12 +658,11 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
     if (busy) return;
     setBusy(true);
     setError('');
-    setMinted('');
+    setMinted(null);
     try {
       const result = await createApiToken(workspaceId, name.trim() || 'cli');
-      if (!result.ok || !result.token) throw new Error(result.detail ?? 'Could not create token.');
       track('api_token_created', {});
-      setMinted(result.token);
+      setMinted(result);
       setName('');
       reload();
     } catch (e) {
@@ -799,7 +713,21 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
             <p className="m-0 mb-1 font-public-mono text-[10px] uppercase tracking-[0.12em] text-signal">
               copy now - shown once
             </p>
-            <code className="break-all font-public-mono text-[12px] text-night-fg">{minted}</code>
+            <code className="break-all font-public-mono text-[12px] text-night-fg">
+              {minted.token}
+            </code>
+            <dl className="m-0 mt-3 grid gap-1 font-public-mono text-[10px] text-night-fg-3">
+              <div>
+                <dt className="inline uppercase tracking-[0.1em]">Scopes: </dt>
+                <dd className="m-0 inline break-words">{minted.scopes.join(', ')}</dd>
+              </div>
+              <div>
+                <dt className="inline uppercase tracking-[0.1em]">Expires: </dt>
+                <dd className="m-0 inline">
+                  <time dateTime={minted.expires_at}>{minted.expires_at}</time>
+                </dd>
+              </div>
+            </dl>
           </div>
         )}
         {active.length > 0 && (
@@ -807,18 +735,26 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
             {active.map((token: ApiToken) => (
               <li
                 key={token.id}
-                className="flex items-center justify-between gap-2 border-t border-night-4 pt-2 first:border-t-0 first:pt-0"
+                className="flex flex-col gap-1 border-t border-night-4 pt-2 first:border-t-0 first:pt-0 sm:flex-row sm:items-start sm:justify-between sm:gap-3"
               >
-                <span className="font-public-sans text-[13px] text-night-fg">
-                  {token.name || 'unnamed'}{' '}
-                  <span className="font-public-mono text-[11px] text-night-fg-3">
-                    {token.token_prefix}…
-                  </span>
-                </span>
+                <div className="min-w-0">
+                  <p className="m-0 font-public-sans text-[13px] text-night-fg">
+                    {token.name || 'unnamed'}{' '}
+                    <span className="font-public-mono text-[11px] text-night-fg-3">
+                      {token.token_prefix}…
+                    </span>
+                  </p>
+                  <p className="m-0 mt-1 break-words font-public-mono text-[10px] text-night-fg-3">
+                    scopes: {token.scopes.join(', ')}
+                  </p>
+                  <p className="m-0 mt-1 font-public-mono text-[10px] text-night-fg-3">
+                    expires: <time dateTime={token.expires_at}>{token.expires_at}</time>
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => void revoke(token.id)}
-                  className="ps-btn-ghost"
+                  className="ps-btn-ghost shrink-0"
                 >
                   Revoke
                 </button>
@@ -832,11 +768,23 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-export function SettingsPage() {
-  const { workspace } = useWorkspace();
+function WorkspaceSettingsPage() {
+  const { session, workspace, reloadWorkspace } = useWorkspace();
   const workspaceId = workspace?.id ?? '';
   const fetcher = useCallback(() => fetchEngine(workspaceId), [workspaceId]);
   const { data: engine, reload } = usePageData(fetcher);
+  const permissionsFetcher = useCallback(
+    () => fetchWorkspacePermissions(workspaceId),
+    [workspaceId]
+  );
+  const {
+    data: permissions,
+    loading: permissionsLoading,
+    error: permissionsError,
+    reload: reloadPermissions,
+  } = usePageData(permissionsFetcher);
+  const permissionsReady =
+    !permissionsLoading && !permissionsError && permissions?.workspace_id === workspaceId;
 
   const [rulesText, setRulesText] = useState((workspace?.agent_rules ?? []).join('\n'));
   const [rulesBusy, setRulesBusy] = useState(false);
@@ -869,63 +817,142 @@ export function SettingsPage() {
         sub="Engine, plan, house rules, and access. Keys are write-only: stored server-side, never displayed again."
       />
 
-      <EngineSection workspaceId={workspaceId} engine={engine} reload={reload} />
-      <TaskMatrixSection workspaceId={workspaceId} engine={engine} reload={reload} />
-      <KeysSection workspaceId={workspaceId} />
-      <PlanSection workspaceId={workspaceId} planId={workspace?.plan ?? 'free'} />
-      <MembersSection workspaceId={workspaceId} planId={workspace?.plan ?? 'free'} />
-
-      <Section title="House rules">
-        <div className="ps-card flex flex-col gap-3 p-5">
-          <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
-            Standing instructions the agent follows on every run, one per line. It proposes new ones
-            through the inbox as it learns from your skips and edits; nothing is adopted without
-            your approve.
-          </p>
-          <textarea
-            value={rulesText}
-            onChange={(e) => setRulesText(e.target.value)}
-            rows={6}
-            aria-label="House rules"
-            placeholder={
-              'Never draft outreach to accounts on the enterprise plan.\nKeep ticket titles under 80 characters.'
-            }
-            className="w-full rounded-md border border-night-4 bg-night-2 p-3 font-public-sans text-[13px] leading-[1.6] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none"
-          />
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void saveRules()}
-              disabled={rulesBusy}
-              className="ps-btn-primary w-fit"
-            >
-              {rulesBusy ? 'Saving…' : 'Save rules'}
-            </button>
-            {rulesStatus && (
-              <span
-                className={
-                  rulesStatus === 'saved'
-                    ? 'font-public-mono text-[11px] uppercase tracking-[0.12em] text-signal'
-                    : 'font-public-sans text-[13px] text-bad'
-                }
-              >
-                {rulesStatus}
-              </span>
+      {!permissionsReady ? (
+        <Section title="Workspace administration">
+          <div className="ps-card flex flex-col gap-3 p-4 sm:p-5">
+            {permissionsError ? (
+              <>
+                <p className="m-0 font-public-sans text-[13px] text-bad" role="alert">
+                  Workspace permissions could not be verified. Administrative controls are hidden
+                  until the check succeeds.
+                </p>
+                <button type="button" onClick={reloadPermissions} className="ps-btn-ghost w-fit">
+                  Retry permission check
+                </button>
+              </>
+            ) : (
+              <p className="m-0 font-public-sans text-[13px] text-night-fg-2" role="status">
+                Checking workspace permissions…
+              </p>
             )}
           </div>
-        </div>
-      </Section>
+        </Section>
+      ) : !permissions.manage_settings &&
+        !permissions.manage_members &&
+        !permissions.manage_billing &&
+        !permissions.delete_workspace ? (
+        <Section title="Workspace administration">
+          <div className="ps-card p-4 sm:p-5">
+            <p className="m-0 font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
+              Your workspace role has read-only access here. Ask a workspace owner or admin to
+              change shared settings.
+            </p>
+          </div>
+        </Section>
+      ) : null}
+
+      {permissionsReady && permissions.manage_settings ? (
+        <>
+          <EngineSection workspaceId={workspaceId} engine={engine} reload={reload} />
+          <TaskMatrixSection workspaceId={workspaceId} engine={engine} reload={reload} />
+          <KeysSection workspaceId={workspaceId} />
+        </>
+      ) : null}
+      {permissionsReady && permissions.manage_billing ? (
+        <BillingSection
+          workspaceId={workspaceId}
+          workspacePlan={workspace?.plan}
+          onStandingChange={reloadWorkspace}
+        />
+      ) : null}
+      {session && permissionsReady && permissions.manage_members ? (
+        <MemberManagementSection
+          workspaceId={workspaceId}
+          planId={workspace?.plan ?? 'free'}
+          actorId={session.user.id}
+        />
+      ) : null}
+
+      {permissionsReady && permissions.manage_settings ? (
+        <Section title="House rules">
+          <div className="ps-card flex flex-col gap-3 p-5">
+            <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
+              Standing instructions the agent follows on every run, one per line. It proposes new
+              ones through the inbox as it learns from your skips and edits; nothing is adopted
+              without your approve.
+            </p>
+            <textarea
+              value={rulesText}
+              onChange={(e) => setRulesText(e.target.value)}
+              rows={6}
+              aria-label="House rules"
+              placeholder={
+                'Never draft outreach to accounts on the enterprise plan.\nKeep ticket titles under 80 characters.'
+              }
+              className="w-full rounded-md border border-night-4 bg-night-2 p-3 font-public-sans text-[13px] leading-[1.6] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none"
+            />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void saveRules()}
+                disabled={rulesBusy}
+                className="ps-btn-primary w-fit"
+              >
+                {rulesBusy ? 'Saving…' : 'Save rules'}
+              </button>
+              {rulesStatus && (
+                <span
+                  className={
+                    rulesStatus === 'saved'
+                      ? 'font-public-mono text-[11px] uppercase tracking-[0.12em] text-signal'
+                      : 'font-public-sans text-[13px] text-bad'
+                  }
+                >
+                  {rulesStatus}
+                </span>
+              )}
+            </div>
+          </div>
+        </Section>
+      ) : null}
 
       <TokensSection workspaceId={workspaceId} />
 
-      <Section title="Workspace">
-        <div className="ps-card flex flex-col gap-1 p-5">
+      <Section title="Workspace identity">
+        <div className="ps-card flex flex-col gap-1 p-4 sm:p-5">
           <p className="m-0 font-public-sans text-[14px] font-medium text-night-fg">
             {workspace?.name}
           </p>
           <p className="m-0 font-public-mono text-[11px] text-night-fg-3">{workspaceId}</p>
         </div>
       </Section>
+
+      <Section title="Privacy, legal, and support">
+        <div className="ps-card flex flex-col gap-3 p-4 sm:p-5">
+          <p className="m-0 max-w-[68ch] font-public-sans text-[12px] leading-[1.55] text-night-fg-2">
+            Optional analytics records only deliberate product events after consent. Postshow does
+            not enable autocapture or session replay. Review or change that choice at any time, or
+            contact Eventools LLC for account, privacy, security, or billing help.
+          </p>
+          <LegalLinks theme="dark" />
+        </div>
+      </Section>
+
+      {session && permissionsReady && permissions.delete_workspace ? (
+        <WorkspaceLifecycleSection
+          key={`${session.user.id}:${workspaceId}`}
+          session={session}
+          workspaceId={workspaceId}
+          workspaceName={workspace?.name ?? ''}
+          onDeleted={reloadWorkspace}
+        />
+      ) : null}
+      {session ? <AccountDeletionSection session={session} /> : null}
     </div>
   );
+}
+
+export function SettingsPage() {
+  const { workspace } = useWorkspace();
+  return <WorkspaceSettingsPage key={workspace?.id ?? 'no-workspace'} />;
 }

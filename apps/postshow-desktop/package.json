@@ -2,29 +2,44 @@
   "name": "@eventools/postshow-desktop",
   "private": true,
   "version": "0.1.0",
+  "author": "Eventools LLC",
   "license": "MIT",
   "description": "Postshow desktop: the menu-bar agent. Wraps the postshow web app in an Electron shell with a background scheduler that runs local jobs (BYOK or Ollama) with catch-up on wake.",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "tsup && POSTSHOW_WEB_URL=http://localhost:5173 electron .",
-    "build": "tsup",
-    "dist": "tsup && electron-builder --mac",
-    "type-check": "tsc --noEmit",
-    "test": "vitest run",
+    "dev": "pnpm --filter postshow build && tsup && POSTSHOW_WEB_URL=http://localhost:5176 electron .",
+    "build": "pnpm --filter postshow build && tsup && node scripts/generate-third-party-notices.mjs",
+    "dist": "pnpm build && electron-builder --mac",
+    "dist:win": "pnpm build && electron-builder --win nsis --x64 --arm64",
+    "verify:package": "node scripts/verify-package-contents.mjs",
+    "verify:windows-icons": "node scripts/verify-windows-icons.mjs",
+    "type-check": "pnpm --filter postshow build && tsc --noEmit",
+    "test": "pnpm --filter postshow build && vitest run",
     "clean": "rm -rf out dist .turbo node_modules"
   },
   "dependencies": {
-    "@eventools/postshow-core": "workspace:*",
-    "postshow": "workspace:*"
+    "@napi-rs/keyring": "1.3.0",
+    "electron-updater": "6.8.9",
+    "undici": "^7.28.0"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring-darwin-arm64": "1.3.0",
+    "@napi-rs/keyring-darwin-x64": "1.3.0",
+    "@napi-rs/keyring-win32-arm64-msvc": "1.3.0",
+    "@napi-rs/keyring-win32-x64-msvc": "1.3.0"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@eventools/config": "workspace:*",
+    "@eventools/postshow-core": "workspace:*",
     "@types/node": "^22.10.2",
     "electron": "^43.1.1",
     "electron-builder": "^26.0.12",
+    "resedit": "1.7.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "postshow": "workspace:*"
   }
 }

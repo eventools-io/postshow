@@ -37,4 +37,19 @@ describe('LandingPage', () => {
     renderLanding();
     expect(screen.getAllByText('an eventools product').length).toBeGreaterThan(0);
   });
+
+  it('exposes authoritative legal, support, and status links in the footer', () => {
+    renderLanding();
+    expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', '/terms');
+    expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', '/privacy');
+    expect(screen.getByRole('link', { name: 'Cookies' })).toHaveAttribute('href', '/cookies');
+    expect(screen.getByRole('link', { name: 'support@eventools.io' })).toHaveAttribute(
+      'href',
+      'mailto:support@eventools.io'
+    );
+    expect(screen.getByRole('link', { name: 'Status' })).toHaveAttribute(
+      'href',
+      'https://status.eventools.io'
+    );
+  });
 });

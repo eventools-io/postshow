@@ -1,19 +1,37 @@
-import { useState, type FormEvent } from 'react';
+import { useCallback, useRef, useState, type FormEvent } from 'react';
 import { joinWaitlist } from '@/lib/waitlist';
+import { TurnstileChallenge, type TurnstileChallengeHandle } from '@/components/TurnstileChallenge';
 
 type FormState = 'idle' | 'submitting' | 'joined' | 'invalid' | 'error';
 
-/** Waitlist form for the dark closing slab. Ephemeral client state; posts to
- * the join_postshow_waitlist RPC. */
+/** Waitlist form for the dark closing slab. The Edge admission endpoint
+ * verifies a dedicated Turnstile action before any service-only database call. */
 export function WaitlistForm() {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<FormState>('idle');
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileBypassed, setTurnstileBypassed] = useState(false);
+  const turnstile = useRef<TurnstileChallengeHandle>(null);
+  const requestId = useRef<string | null>(null);
+
+  const handleTurnstileChange = useCallback((token: string | null, bypassed: boolean) => {
+    setTurnstileToken(token);
+    setTurnstileBypassed(bypassed);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (state === 'submitting') return;
+    if (!turnstileToken) {
+      setState('error');
+      return;
+    }
+    requestId.current ??= crypto.randomUUID();
     setState('submitting');
-    setState(await joinWaitlist(email));
+    const result = await joinWaitlist(email, turnstileToken, requestId.current);
+    setTurnstileToken(null);
+    turnstile.current?.reset();
+    setState(result);
   }
 
   if (state === 'joined') {
@@ -27,27 +45,46 @@ export function WaitlistForm() {
 
   return (
     <div className="flex w-full max-w-[440px] flex-col items-center gap-3">
-      <form onSubmit={handleSubmit} className="flex w-full flex-col gap-3 sm:flex-row">
-        <label htmlFor="waitlist-email" className="sr-only">
-          Email address
-        </label>
-        <input
-          id="waitlist-email"
-          type="email"
-          autoComplete="email"
-          required
-          placeholder="you@company.com"
-          value={email}
-          onChange={(e) => {
-            setEmail(e.target.value);
-            if (state === 'invalid' || state === 'error') setState('idle');
-          }}
-          className="h-11 flex-1 rounded-pill border border-night-4 bg-night-2 px-5 font-public-sans text-[14px] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none"
+      <form onSubmit={handleSubmit} className="flex w-full flex-col gap-3">
+        <div className="flex w-full flex-col gap-3 sm:flex-row">
+          <label htmlFor="waitlist-email" className="sr-only">
+            Email address
+          </label>
+          <input
+            id="waitlist-email"
+            type="email"
+            autoComplete="email"
+            required
+            placeholder="you@company.com"
+            value={email}
+            onChange={(event) => {
+              setEmail(event.target.value);
+              if (turnstileToken || requestId.current) turnstile.current?.reset();
+              requestId.current = null;
+              setTurnstileToken(null);
+              if (state === 'invalid' || state === 'error') setState('idle');
+            }}
+            className="h-11 flex-1 rounded-pill border border-night-4 bg-night-2 px-5 font-public-sans text-[14px] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none"
+          />
+          <button
+            type="submit"
+            disabled={state === 'submitting' || !turnstileToken}
+            className="mk-btn-signal"
+          >
+            {state === 'submitting' ? 'Joining…' : 'Join the waitlist'}
+          </button>
+        </div>
+        <TurnstileChallenge
+          ref={turnstile}
+          action="postshow_waitlist_join"
+          onChange={handleTurnstileChange}
         />
-        <button type="submit" disabled={state === 'submitting'} className="mk-btn-signal">
-          {state === 'submitting' ? 'Joining…' : 'Join the waitlist'}
-        </button>
       </form>
+      {turnstileBypassed ? (
+        <p className="m-0 font-public-sans text-[12px] text-night-fg-2" role="status">
+          Waitlist development requires Cloudflare&rsquo;s Turnstile test site key and secret.
+        </p>
+      ) : null}
       {state === 'invalid' && (
         <p className="m-0 font-public-sans text-[13px] text-night-fg-2" role="alert">
           That email doesn&rsquo;t look right. Check it and try again.
