@@ -34,7 +34,9 @@ export interface CliConfig {
 
 export function defaultConfig(): CliConfig {
   return {
-    apiUrl: process.env.POSTSHOW_API_URL ?? 'https://qlszsqnhjaywvkgdzoxz.supabase.co',
+    // The workspace's Supabase URL, shown next to the token in Settings.
+    // There is no meaningful default until the user pastes theirs.
+    apiUrl: process.env.POSTSHOW_API_URL ?? '',
     token: process.env.POSTSHOW_TOKEN ?? '',
     workspaceId: '',
     workspaceName: '',

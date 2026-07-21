@@ -119,9 +119,9 @@ postshow mcp           # expose the workspace to your coding agent`}</code>
             </pre>
           </div>
           <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            Everything above develops in the open in one repository. Credentials never pass
-            through a model, connectors marked local-only never send raw data anywhere, and
-            everything the agent wants to do waits in an inbox for your approve.
+            Everything above develops in the open in one repository. Credentials never pass through
+            a model, connectors marked local-only never send raw data anywhere, and everything the
+            agent wants to do waits in an inbox for your approve.
           </p>
         </section>
 

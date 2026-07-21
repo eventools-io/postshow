@@ -349,9 +349,7 @@ describe('prompts and sanitize', () => {
         'not even an object',
         null,
       ],
-      inbox_items: [
-        { title: 'ok', meta: { account: 'Acme' }, body: ['a'], evidence: 1, kind: {} },
-      ],
+      inbox_items: [{ title: 'ok', meta: { account: 'Acme' }, body: ['a'], evidence: 1, kind: {} }],
       account_updates: [{ name: 123, facts: 'not-an-array', next_move: {} }],
       proposed_job: { label: { text: 'x' }, interval_minutes: 60 },
       proposed_rule: ['not', 'a', 'string'],
