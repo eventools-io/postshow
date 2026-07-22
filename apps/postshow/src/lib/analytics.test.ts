@@ -129,6 +129,15 @@ describe('analytics consent boundary', () => {
     };
     expect(beforeSend(authNoise)).toBeNull();
 
+    const authNoiseFlat = {
+      event: '$exception',
+      properties: {
+        $exception_types: ['AuthApiError'],
+        $exception_values: ['Invalid Refresh Token: Refresh Token Not Found'],
+      },
+    };
+    expect(beforeSend(authNoiseFlat)).toBeNull();
+
     const realError = {
       event: '$exception',
       properties: {

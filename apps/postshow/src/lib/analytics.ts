@@ -63,16 +63,23 @@ function stripUrlDetails(value: unknown): unknown {
  * throws an uncaught `AuthApiError`, which exception autocapture would file as
  * an error. It is an expected auth condition, not a bug — our own `getSession`
  * path already handles it — so drop it before it becomes error-tracking noise. */
+function isStaleRefreshToken(type: unknown, value: unknown): boolean {
+  return (
+    type === 'AuthApiError' && typeof value === 'string' && /invalid refresh token/i.test(value)
+  );
+}
+
 function isBenignAuthRefreshException(result: CaptureResult): boolean {
   if (result.event !== '$exception') return false;
   const properties = result.properties;
   const list = properties?.$exception_list;
-  const exceptions = Array.isArray(list) ? list : [];
-  return exceptions.some((exception) => {
-    const type = typeof exception?.type === 'string' ? exception.type : '';
-    const value = typeof exception?.value === 'string' ? exception.value : '';
-    return type === 'AuthApiError' && /invalid refresh token/i.test(value);
-  });
+  if (Array.isArray(list) && list.some((e) => isStaleRefreshToken(e?.type, e?.value))) return true;
+  // Fall back to the flat convenience arrays some capture paths populate instead.
+  const types = properties?.$exception_types;
+  const values = properties?.$exception_values;
+  return (
+    Array.isArray(types) && Array.isArray(values) && types.some((t, i) => isStaleRefreshToken(t, values[i]))
+  );
 }
 
 function sanitizeCapture(result: CaptureResult | null): CaptureResult | null {
