@@ -98,6 +98,22 @@ export function commandFailureMessage(error) {
   return detail ? `${error.message}\n${detail}` : error.message;
 }
 
+export function isMissingPnpmPackageIndex(error) {
+  return [error?.message, error?.stderr, error?.stdout].some((output) =>
+    output?.toString().includes('ERR_PNPM_MISSING_PACKAGE_INDEX_FILE')
+  );
+}
+
+export function withPnpmMetadataRepair(inventory, repair) {
+  try {
+    return inventory();
+  } catch (error) {
+    if (!isMissingPnpmPackageIndex(error)) throw error;
+    repair();
+    return inventory();
+  }
+}
+
 function json(path) {
   return JSON.parse(readFileSync(resolve(root, path), 'utf8'));
 }
@@ -175,17 +191,35 @@ function checkLicenseCopies(failures) {
   }
 }
 
-function checkDependencyLicenses(failures, { siteDependencies = false } = {}) {
-  let licenses;
-  try {
-    licenses = JSON.parse(
+function inventoryDependencyLicenses({ siteDependencies = false } = {}) {
+  const commonOptions = {
+    cwd: root,
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  };
+  const inventory = () =>
+    JSON.parse(
       execFileSync('pnpm', dependencyLicenseArguments({ siteDependencies }), {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 16 * 1024 * 1024,
+        ...commonOptions,
         stdio: ['ignore', 'pipe', 'pipe'],
       })
     );
+
+  return withPnpmMetadataRepair(inventory, () => {
+    process.stderr.write(
+      'pnpm dependency metadata is incomplete; rebuilding the frozen install once.\n'
+    );
+    execFileSync('pnpm', ['install', '--frozen-lockfile', '--force', '--ignore-scripts'], {
+      ...commonOptions,
+      stdio: ['ignore', 'inherit', 'pipe'],
+    });
+  });
+}
+
+function checkDependencyLicenses(failures, { siteDependencies = false } = {}) {
+  let licenses;
+  try {
+    licenses = inventoryDependencyLicenses({ siteDependencies });
   } catch (error) {
     failures.push(
       `could not inventory installed production dependency licenses: ${commandFailureMessage(error)}`

@@ -9,6 +9,8 @@ import {
   immutableReference,
   inlineScriptHashes,
   inlineScripts,
+  isMissingPnpmPackageIndex,
+  withPnpmMetadataRepair,
 } from './check-repository-governance.mjs';
 
 test('keeps repository and site dependency license inventories distinct', () => {
@@ -29,6 +31,48 @@ test('includes captured command diagnostics in governance failures', () => {
     'command failed\nmissing package index'
   );
   assert.equal(commandFailureMessage({ message: 'command failed' }), 'command failed');
+});
+
+test('repairs a missing pnpm package index once before retrying inventory', () => {
+  let inventoryAttempts = 0;
+  let repairAttempts = 0;
+  const result = withPnpmMetadataRepair(
+    () => {
+      inventoryAttempts += 1;
+      if (inventoryAttempts === 1) {
+        throw Object.assign(new Error('pnpm licenses failed'), {
+          stderr: '{"code":"ERR_PNPM_MISSING_PACKAGE_INDEX_FILE"}',
+        });
+      }
+      return { MIT: [] };
+    },
+    () => {
+      repairAttempts += 1;
+    }
+  );
+
+  assert.deepEqual(result, { MIT: [] });
+  assert.equal(inventoryAttempts, 2);
+  assert.equal(repairAttempts, 1);
+});
+
+test('does not repair unrelated license inventory failures', () => {
+  const error = new Error('registry unavailable');
+  let repairAttempts = 0;
+  assert.equal(isMissingPnpmPackageIndex(error), false);
+  assert.throws(
+    () =>
+      withPnpmMetadataRepair(
+        () => {
+          throw error;
+        },
+        () => {
+          repairAttempts += 1;
+        }
+      ),
+    (thrown) => thrown === error
+  );
+  assert.equal(repairAttempts, 0);
 });
 
 test('isolates npm pack filename from lifecycle output', () => {

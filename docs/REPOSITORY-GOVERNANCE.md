@@ -25,6 +25,10 @@ closure. This keeps a web deploy independent of unshipped desktop, CLI, and buil
 tool dependencies. The default check and the full repository build continue to
 inventory every workspace's production dependencies.
 
+If pnpm reports that a cached package-index file is missing, the inventory repairs
+the frozen install once with dependency lifecycle scripts disabled, then retries.
+Other inventory errors and any unapproved license expression still fail the check.
+
 Dependabot is configured for weekly pnpm-workspace and GitHub Actions updates.
 CODEOWNERS names the two current repository administrators, and issue and
 pull-request templates route sensitive reports away from public issues.
