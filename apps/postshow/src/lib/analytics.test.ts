@@ -111,6 +111,33 @@ describe('analytics consent boundary', () => {
     expect(mocks.startSessionRecording).toHaveBeenCalled();
   });
 
+  it('drops benign supabase stale-refresh-token exceptions before capture', async () => {
+    const { setAnalyticsConsent } = await analytics();
+
+    setAnalyticsConsent('accepted');
+    await vi.waitFor(() => expect(mocks.init).toHaveBeenCalledTimes(1));
+    const config = mocks.init.mock.calls[0]?.[1] as { before_send: (result: unknown) => unknown };
+    const beforeSend = config.before_send;
+
+    const authNoise = {
+      event: '$exception',
+      properties: {
+        $exception_list: [
+          { type: 'AuthApiError', value: 'Invalid Refresh Token: Refresh Token Not Found' },
+        ],
+      },
+    };
+    expect(beforeSend(authNoise)).toBeNull();
+
+    const realError = {
+      event: '$exception',
+      properties: {
+        $exception_list: [{ type: 'TypeError', value: 'x is not a function' }],
+      },
+    };
+    expect(beforeSend(realError)).toBe(realError);
+  });
+
   it('captures and identifies only after explicit consent, without email properties', async () => {
     const { identify, initAnalytics, setAnalyticsConsent, track } = await analytics();
     initAnalytics();

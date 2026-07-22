@@ -57,8 +57,27 @@ function stripUrlDetails(value: unknown): unknown {
   }
 }
 
+/** supabase-js runs a background timer (`autoRefreshToken: true`) that tries to
+ * rotate the session token. When the stored refresh token is stale (signed out
+ * in another tab, cleared storage, or an already-expired session) that timer
+ * throws an uncaught `AuthApiError`, which exception autocapture would file as
+ * an error. It is an expected auth condition, not a bug — our own `getSession`
+ * path already handles it — so drop it before it becomes error-tracking noise. */
+function isBenignAuthRefreshException(result: CaptureResult): boolean {
+  if (result.event !== '$exception') return false;
+  const properties = result.properties;
+  const list = properties?.$exception_list;
+  const exceptions = Array.isArray(list) ? list : [];
+  return exceptions.some((exception) => {
+    const type = typeof exception?.type === 'string' ? exception.type : '';
+    const value = typeof exception?.value === 'string' ? exception.value : '';
+    return type === 'AuthApiError' && /invalid refresh token/i.test(value);
+  });
+}
+
 function sanitizeCapture(result: CaptureResult | null): CaptureResult | null {
   if (!result) return null;
+  if (isBenignAuthRefreshException(result)) return null;
   const properties = result.properties;
   for (const key of ['$current_url', '$referrer', '$referring_url']) {
     if (key in properties) properties[key] = stripUrlDetails(properties[key]);
