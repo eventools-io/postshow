@@ -163,7 +163,7 @@ jobs:
           mv "packages/postshow-cli/$expected" release-cli/
           tar -tzf "release-cli/$expected" | sort
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cli-package
           path: release-cli/*
@@ -729,7 +729,7 @@ jobs:
         shell: bash
         run: rm -f "$APPLE_API_KEY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-macos
           path: release-mac/*
@@ -979,7 +979,7 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-x64.exe.blockmap") -Destination release-win
           Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-arm64.exe") -Destination release-win
           Copy-Item -LiteralPath (Join-Path $dist "Postshow-$env:VERSION-win-arm64.exe.blockmap") -Destination release-win
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-windows
           path: release-win/*
@@ -1213,7 +1213,7 @@ jobs:
             printf '%s\n' "${expected[@]}" | sort | xargs sha256sum > SHA256SUMS.txt
             sha256sum -c SHA256SUMS.txt
           )
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: signed-release-dry-run-${{ needs.preflight.outputs.version }}
           path: verified-release/*
