@@ -16,6 +16,7 @@ import {
   resolveTaskEngine,
   sanitizeModelOutput,
   sentryGather,
+  sourceEvidenceContext,
   sourceIdentityContext,
   stripeSourceAccounts,
   stripeGather,
@@ -576,9 +577,11 @@ export async function executeLocalJob(
     }
     const gathered = await Promise.allSettled(gatherers.map((source) => source.gather()));
     let successfulSources = 0;
+    const failedEvidenceSources = new Set<string>();
     for (const [index, result] of gathered.entries()) {
       if (result.status === 'fulfilled') successfulSources += 1;
       else {
+        failedEvidenceSources.add(gatherers[index]!.provider);
         dependencies.warn(
           `  ${gatherers[index]!.provider}: gather failed (${errorDetail(result.reason)})`
         );
@@ -643,8 +646,17 @@ export async function executeLocalJob(
     // unknown keys cannot reach the gateway or workspace storage; the gateway
     // repeats this sanitization as defense in depth.
     const gatheredPosthog = posthog as PosthogGather | null;
-    const sourceAccounts = stripeSourceAccounts(stripe);
-    const identityContext = sourceIdentityContext(gatheredPosthog, stripe);
+    const gatheredStripe = stripe as GatherResult<StripeAccount[]> | null;
+    const gatheredSentry = sentry as GatherResult<SentryIssue[]> | null;
+    const gatheredGithub = github as GatherResult<GithubPr[]> | null;
+    const sourceAccounts = stripeSourceAccounts(gatheredStripe);
+    const identityContext = sourceIdentityContext(gatheredPosthog, gatheredStripe);
+    const evidenceContext = sourceEvidenceContext({
+      posthog: failedEvidenceSources.has('posthog') ? 'failed' : gatheredPosthog?.completeness,
+      stripe: failedEvidenceSources.has('stripe') ? 'failed' : gatheredStripe?.completeness,
+      sentry: failedEvidenceSources.has('sentry') ? 'failed' : gatheredSentry?.completeness,
+      github: failedEvidenceSources.has('github') ? 'failed' : gatheredGithub?.completeness,
+    });
     const output = sanitizeModelOutput(dependencies.parseModelJson(result.text), {
       allowedSessionIds: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
       allowedAccountIdentityKeys: sourceAccounts.map((account) => account.identityKey),
@@ -670,6 +682,7 @@ export async function executeLocalJob(
         source_accounts: sourceAccounts,
         source_session_ids: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
         identity_context: identityContext,
+        evidence_context: evidenceContext,
         engine: engineLabel,
         sessions_watched: sessionsWatched,
         usage: {

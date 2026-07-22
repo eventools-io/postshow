@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { invokePostshowFunction } from './functionClient';
 import { posthogReplayConfig } from './replay';
+import { parseIncidentEvidenceLedger } from './incidentEvidence';
 import type {
   Workspace,
   WorkspaceMember,
@@ -35,6 +36,17 @@ function throwing<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message);
   if (data === null) throw new Error('empty response');
   return data;
+}
+
+function customerIncident(value: unknown): CustomerIncident {
+  const incident =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    ...incident,
+    evidence_ledger: parseIncidentEvidenceLedger(incident.evidence_ledger),
+  } as unknown as CustomerIncident;
 }
 
 export async function fetchWorkspaces(): Promise<Workspace[]> {
@@ -158,7 +170,7 @@ export async function fetchIncidents(workspaceId: string): Promise<CustomerIncid
     .neq('lifecycle_state', 'closed')
     .order('last_seen_at', { ascending: false })
     .limit(200);
-  return throwing(data, error) as CustomerIncident[];
+  return throwing(data, error).map(customerIncident);
 }
 
 export async function fetchAccountIncidentLinks(
@@ -251,7 +263,7 @@ export async function fetchIncidentDossier(
   }
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   return {
-    incident: incident as CustomerIncident,
+    incident: customerIncident(incident),
     accounts: rawLinks.flatMap((link) => {
       const account = accountById.get(link.account_id);
       return account ? [{ ...link, account }] : [];

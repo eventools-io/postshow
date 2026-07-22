@@ -234,6 +234,15 @@ describe('local claim contract', () => {
     expect(submit?.args.output).not.toHaveProperty('source_accounts');
     expect(submit?.args.output).not.toHaveProperty('sourceAccounts');
     expect(submit?.args.source_accounts).toEqual([]);
+    expect(submit?.args.evidence_context).toEqual({
+      version: 1,
+      sources: {
+        posthog: { state: 'not_gathered', returned: 0, available: null },
+        stripe: { state: 'complete', returned: 0, available: 0 },
+        sentry: { state: 'not_gathered', returned: 0, available: null },
+        github: { state: 'not_gathered', returned: 0, available: null },
+      },
+    });
   });
 
   it('uses the atomic optional job_id claim for a targeted run', async () => {
@@ -366,6 +375,12 @@ describe('executeLocalJob', () => {
     expect(test.dependencies.warn).toHaveBeenCalledWith(
       '  posthog: gather failed (posthog unavailable)'
     );
+    const submit = test.gatewayCalls.find(
+      (call) => call.op === 'runs.submit' && call.args.status === 'ok'
+    );
+    expect(submit?.args.evidence_context).toMatchObject({
+      sources: { posthog: { state: 'failed', returned: 0, available: null } },
+    });
   });
 
   it('runs with a verified local-only Postgres query and uploads no credential or raw rows', async () => {

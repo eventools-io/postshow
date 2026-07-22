@@ -3,11 +3,50 @@ import { Link, useParams } from 'react-router-dom';
 import { ReplayLinks } from '@/components/ReplayLinks';
 import { ErrorRow, LoadingRow, Section } from '@/components/page';
 import { fetchIncidentDossier, fetchPosthogReplayConfig } from '@/lib/api';
-import type { Account, IncidentDossier, PosthogReplayConfig } from '@/lib/types';
+import type {
+  Account,
+  IncidentDossier,
+  IncidentEvidenceDecision,
+  IncidentEvidenceRequirement,
+  PosthogReplayConfig,
+} from '@/lib/types';
 import { usePageData } from '@/lib/usePageData';
 import { useWorkspace } from '@/state/WorkspaceContext';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const REQUIREMENT_LABELS: Record<IncidentEvidenceRequirement['key'], string> = {
+  behavior: 'Behavior evidence',
+  account_identity: 'Account identity',
+  technical_failure: 'Technical failure evidence',
+  code_context: 'Code context',
+  recovery_check: 'Recovery check',
+};
+
+const GAP_LABELS: Record<string, string> = {
+  account_identity_not_grounded: 'No affected account is grounded to this incident yet.',
+  technical_failure_not_linked: 'No Sentry issue is linked to this incident yet.',
+  code_context_not_linked: 'No GitHub code reference is linked to this incident yet.',
+  recovery_check_missing: 'The recovery check is not measurable yet.',
+  behavior_evidence_missing: 'No source-grounded behavior evidence remains attached.',
+  evidence_not_evaluated: 'The evidence decision is unavailable for this incident.',
+};
+
+function decisionCopy(decision: IncidentEvidenceDecision): string {
+  if (decision === 'act') {
+    return 'The grounded evidence clears the threshold for human review. This decision does not execute the intervention.';
+  }
+  if (decision === 'abstain') {
+    return 'The evidence does not clear the minimum incident-action threshold, so Postshow stopped.';
+  }
+  return 'The incident is worth retaining, but the next intervention needs more evidence before review.';
+}
+
+function requirementTone(status: IncidentEvidenceRequirement['status']): string {
+  if (status === 'supported') return 'text-signal';
+  if (status === 'partial') return 'text-warn';
+  return 'text-night-fg-3';
+}
 
 function mrr(account: Account): string {
   if (account.mrr_cents === null) return 'revenue unavailable';
@@ -42,6 +81,7 @@ export function IncidentPage() {
   const hypothesis = incident.root_cause_hypothesis;
   const verification = incident.verification_contract;
   const outcome = incident.measured_outcome;
+  const ledger = incident.evidence_ledger;
 
   return (
     <article>
@@ -58,6 +98,9 @@ export function IncidentPage() {
             {incident.severity} severity
           </span>
           {coverage.sampled ? <span className="text-warn">sampled run coverage</span> : null}
+          <span className={ledger.decision === 'act' ? 'text-signal' : 'text-warn'}>
+            decision: {ledger.decision.replaceAll('_', ' ')}
+          </span>
         </p>
         <h1 className="m-0 mt-3 max-w-[24ch] font-public-sans text-[clamp(28px,4vw,44px)] font-semibold leading-[1.08] tracking-[-0.03em] text-night-fg">
           {incident.title}
@@ -67,7 +110,62 @@ export function IncidentPage() {
         </p>
       </header>
 
-      <div className="grid gap-5 pt-6 lg:grid-cols-[1.35fr_0.65fr]">
+      <section className="pt-6" aria-labelledby="evidence-decision-title">
+        <div className="ps-card overflow-hidden">
+          <div className="grid gap-4 border-b border-night-3 p-5 md:grid-cols-[0.7fr_1.3fr]">
+            <div>
+              <p className="mk-eyebrow m-0 text-signal">evidence decision</p>
+              <h2
+                id="evidence-decision-title"
+                className="m-0 mt-2 font-public-sans text-[24px] font-semibold capitalize tracking-[-0.02em]"
+              >
+                {ledger.decision.replaceAll('_', ' ')}
+              </h2>
+              <p className="m-0 mt-2 font-public-mono text-[10px] uppercase tracking-[0.1em] text-night-fg-3">
+                {ledger.policy_version} · {ledger.reason_code.replaceAll('_', ' ')}
+              </p>
+            </div>
+            <p className="m-0 max-w-[68ch] font-public-sans text-[14px] leading-[1.6] text-night-fg-2">
+              {decisionCopy(ledger.decision)} The model may propose a cause or action, but this
+              policy-owned decision is derived from persisted evidence.
+            </p>
+          </div>
+          <ul className="m-0 grid list-none p-0 md:grid-cols-5">
+            {ledger.requirements.map((requirement) => (
+              <li
+                key={requirement.key}
+                className="border-b border-night-3 p-4 last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0"
+              >
+                <p className="m-0 font-public-sans text-[12px] font-medium">
+                  {REQUIREMENT_LABELS[requirement.key]}
+                </p>
+                <p
+                  className={`m-0 mt-2 font-public-mono text-[10px] uppercase tracking-[0.1em] ${requirementTone(requirement.status)}`}
+                >
+                  {requirement.status.replaceAll('_', ' ')}
+                </p>
+                <p className="m-0 mt-1 font-public-mono text-[9px] text-night-fg-3">
+                  {requirement.evidence_count} linked · {requirement.sources.join(' + ')}
+                </p>
+              </li>
+            ))}
+          </ul>
+          {ledger.gaps.length > 0 ? (
+            <div className="border-t border-night-3 px-5 py-4">
+              <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.11em] text-night-fg-3">
+                open evidence gaps
+              </p>
+              <ul className="mb-0 mt-2 pl-5 font-public-sans text-[12px] leading-[1.55] text-warn">
+                {ledger.gaps.map((gap) => (
+                  <li key={gap}>{GAP_LABELS[gap] ?? gap.replaceAll('_', ' ')}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <div className="grid gap-5 pt-5 lg:grid-cols-[1.35fr_0.65fr]">
         <section className="ps-card p-5">
           <p className="mk-eyebrow m-0 text-signal">behavior evidence</p>
           <h2 className="m-0 mt-2 font-public-sans text-[19px] font-semibold">

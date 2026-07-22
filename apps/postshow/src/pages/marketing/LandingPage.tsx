@@ -16,8 +16,8 @@ const STEPS = [
   },
   {
     number: '02',
-    title: 'Connect impact to cause',
-    body: 'Stripe identifies the affected accounts and revenue. GitHub and Sentry add the code and error context needed to explain the cause.',
+    title: 'Show what the evidence supports',
+    body: 'Stripe grounds affected accounts and revenue. A deterministic evidence decision shows what is supported, what is still missing, and why Postshow acts or stops.',
   },
   {
     number: '03',
@@ -30,8 +30,8 @@ const CAPABILITIES = [
   {
     number: '01',
     tag: 'Evidence',
-    title: 'The receipts behind the incident',
-    body: 'Replay sessions, errors, events, and metrics stay attached to the claim so a human can verify it in one click.',
+    title: 'The receipts—and the gaps',
+    body: 'Replay evidence stays attached to the claim. A policy-owned ledger says what is supported, partial, or not linked; the model cannot certify itself.',
   },
   {
     number: '02',
@@ -107,7 +107,7 @@ const TIERS = [
 const FAQ = [
   {
     q: 'How is this different from PostHog or Amplitude?',
-    a: 'Postshow does not replace product analytics. The closed-beta goal is to turn corroborating behavior into a customer incident that connects replay evidence, affected accounts, revenue, suspected product cause, proposed actions, and the result after the work ships. PostHog is the initial behavior source.',
+    a: 'Postshow does not replace product analytics. It joins corroborating behavior to affected accounts and revenue, then exposes a deterministic act, gather-more, or abstain decision with the missing evidence. The closed-beta goal extends that incident through the product fix, customer response, and measured result. PostHog is the initial behavior source.',
   },
   {
     q: 'Where does my customer data go?',
@@ -148,7 +148,7 @@ function Hero() {
         <p className="reveal reveal-3 m-0 mt-7 max-w-[58ch] font-public-sans text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-shell-fg-2">
           We&rsquo;re building Postshow to connect real sessions to affected accounts and revenue,
           prepare the product fix and customer response, then check whether the intervention worked.
-          Every claim should come with evidence. Nothing ships without you.
+          Every incident says why it acted&mdash;or stopped. Nothing ships without you.
         </p>
         <div className="reveal reveal-4 mt-9 flex flex-wrap justify-center gap-3">
           <a href="#waitlist" className="mk-btn-dark">
@@ -201,9 +201,9 @@ function DemoSection() {
         </h2>
         <p className="m-0 mt-4 font-public-sans text-[15px] leading-[1.55] text-shell-fg-2">
           This synthetic walkthrough shows the whole loop. In the authenticated beta, Postshow now
-          persists replay evidence, account impact, suspected cause, proposed interventions, and a
-          verification plan in one incident. Automated fix preparation and measured outcomes are
-          still being built.
+          persists replay evidence, account impact, an explicit evidence decision, suspected cause,
+          proposed interventions, and a verification plan in one incident. Automated fix preparation
+          and measured outcomes are still being built.
         </p>
       </div>
       <div className="mt-10">

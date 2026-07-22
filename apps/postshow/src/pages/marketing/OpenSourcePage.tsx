@@ -9,7 +9,8 @@ const COMPONENTS = [
   {
     path: 'packages/postshow-core',
     name: 'Evidence and model engine',
-    detail: 'Connector adapters, task prompts, sanitization, scheduling, retries, and cost rules.',
+    detail:
+      'Connector adapters, source-coverage contracts, task prompts, sanitization, scheduling, retries, and cost rules.',
   },
   {
     path: 'packages/postshow-cli',
@@ -68,10 +69,12 @@ export function OpenSourcePage() {
         </h1>
         <p className="m-0 mt-6 max-w-[66ch] font-public-sans text-[16px] leading-[1.65] text-shell-fg-2">
           Postshow connects product evidence to affected customers, proposed interventions, and a
-          verification plan. This repository contains the shared evidence and identity engine, the
-          incident-review web client, local runtime, CLI, MCP server, desktop agent, and a synthetic
-          walkthrough of the full recovery loop. Automated fix preparation and measured outcomes are
-          still being built. All of these components are MIT licensed.
+          verification plan. Its shared contract also exposes the source coverage behind each run;
+          the managed incident ledger turns that into an explicit act, gather-more, or abstain
+          decision. This repository contains the evidence and identity engine, incident-review web
+          client, local runtime, CLI, MCP server, desktop agent, and a synthetic walkthrough of the
+          full recovery loop. Automated fix preparation and measured outcomes are still being built.
+          All of these components are MIT licensed.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <a href={REPOSITORY_URL} className="mk-btn-dark" target="_blank" rel="noreferrer">

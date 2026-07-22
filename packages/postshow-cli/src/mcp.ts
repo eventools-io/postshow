@@ -60,7 +60,7 @@ export async function runMcpServer(): Promise<number> {
     {
       title: 'List customer incidents',
       description:
-        'Source-grounded customer incidents with replay evidence, account and revenue exposure, suspected cause, intervention state, and verification contract.',
+        'Source-grounded customer incidents with an explicit act, gather-more, or abstain decision; evidence gaps; account and revenue exposure; suspected cause; intervention state; and verification contract.',
       inputSchema: { limit: z.number().int().max(200).optional() },
       annotations: { readOnlyHint: true },
     },
@@ -72,7 +72,7 @@ export async function runMcpServer(): Promise<number> {
     {
       title: 'Get one customer incident',
       description:
-        'Read the complete incident dossier and its linked account, observation, and proposed-intervention records.',
+        'Read the complete incident dossier, policy-owned evidence ledger, and linked account, observation, and proposed-intervention records.',
       inputSchema: { incident_id: z.string().uuid() },
       annotations: { readOnlyHint: true },
     },

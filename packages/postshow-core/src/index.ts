@@ -8,3 +8,4 @@ export * from './schedule';
 export * from './adapters';
 export * from './network';
 export * from './identity';
+export * from './evidence';

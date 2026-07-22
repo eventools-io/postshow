@@ -2,7 +2,7 @@
   <img src="assets/postshow-logo.svg" alt="Postshow" width="246">
 </p>
 
-Postshow is a customer-incident agent for B2B software teams. The current incident spine connects source-grounded product behavior to affected accounts and revenue, keeps proposed interventions beside the evidence, and records the verification plan. Automated product-fix preparation and measured post-intervention outcomes are the next part of the loop.
+Postshow is a customer-incident agent for B2B software teams. The current incident spine connects source-grounded product behavior to affected accounts and revenue, keeps proposed interventions beside the evidence, and records the verification plan. Each incident also exposes a deterministic evidence decision—`act`, `gather_more`, or `abstain`—with the evidence gaps that produced it. Automated product-fix preparation and measured post-intervention outcomes are the next part of the loop.
 
 [Website](https://postshow.io) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
 
@@ -13,7 +13,7 @@ customer behavior → account and revenue impact → product cause
         → human-reviewed fix and follow-up → measured outcome
 ```
 
-A Postshow customer incident keeps replay evidence, affected accounts, current revenue exposure, a suspected product cause, proposed actions, and the verification contract together. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
+A Postshow customer incident keeps replay evidence, affected accounts, current revenue exposure, a policy-owned evidence ledger, a suspected product cause, proposed actions, and the verification contract together. A model may propose a cause or action; it cannot mark its own evidence complete. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
 
 Postshow is in closed beta. Provisioned workspaces can use the open clients and local runtime with their own model key or Ollama; the repository does not yet provide a standalone workspace control plane. Managed cloud availability is gated while the complete incident-to-recovery loop is validated.
 
@@ -60,6 +60,7 @@ Contributions must preserve these invariants:
 - Customer communication never sends automatically.
 - Generated code never merges automatically.
 - Evidence and affected-customer context must stay attached to consequential actions.
+- Source availability is not incident evidence; a connector record only counts after an exact reference is linked to the incident.
 
 ## Contributing
 

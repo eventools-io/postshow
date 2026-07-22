@@ -30,6 +30,11 @@ function IncidentRow({ incident }: { incident: CustomerIncident }) {
           <p className="m-0 flex flex-wrap gap-3 font-public-mono text-[10px] font-medium uppercase tracking-[0.13em]">
             <span className={SEVERITY[incident.severity]}>{incident.severity}</span>
             <span className="text-signal">{incident.lifecycle_state.replaceAll('_', ' ')}</span>
+            <span
+              className={incident.evidence_ledger.decision === 'act' ? 'text-signal' : 'text-warn'}
+            >
+              {incident.evidence_ledger.decision.replaceAll('_', ' ')}
+            </span>
             {sampled ? <span className="text-warn">sampled evidence</span> : null}
           </p>
           <span className="font-public-mono text-[10px] text-night-fg-3 group-hover:text-night-fg-2">

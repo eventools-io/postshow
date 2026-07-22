@@ -216,6 +216,39 @@ export type IncidentLifecycle =
   | 'inconclusive'
   | 'closed';
 
+export type IncidentEvidenceDecision = 'act' | 'gather_more' | 'abstain';
+export type IncidentEvidenceStatus = 'supported' | 'partial' | 'not_linked' | 'missing';
+export type IncidentEvidenceSourceState =
+  | 'complete'
+  | 'sampled'
+  | 'partial'
+  | 'failed'
+  | 'not_gathered';
+
+export interface IncidentEvidenceRequirement {
+  key: 'behavior' | 'account_identity' | 'technical_failure' | 'code_context' | 'recovery_check';
+  status: IncidentEvidenceStatus;
+  evidence_count: number;
+  sources: string[];
+  source_states: Record<string, IncidentEvidenceSourceState>;
+}
+
+export interface IncidentEvidenceLedger {
+  policy_version: string;
+  evaluated_run_id: string | null;
+  decision: IncidentEvidenceDecision;
+  reason_code: string;
+  requirements: IncidentEvidenceRequirement[];
+  gaps: string[];
+  source_context: {
+    version?: number;
+    sources?: Record<
+      string,
+      { state?: IncidentEvidenceSourceState; returned?: number; available?: number | null }
+    >;
+  };
+}
+
 export interface CustomerIncident {
   id: string;
   workspace_id: string;
@@ -248,6 +281,7 @@ export interface CustomerIncident {
     status?: string;
   };
   measured_outcome: { status?: string; [key: string]: unknown };
+  evidence_ledger: IncidentEvidenceLedger;
   first_seen_at: string;
   last_seen_at: string;
   created_at: string;
