@@ -1,5 +1,5 @@
 // `postshow mcp` - the MCP server, stdio transport. Exposes the workspace to
-// coding agents: read the inbox, accounts, field notes, and work plan; hand
+// coding agents: read incidents, the inbox, accounts, field notes, and work plan; hand
 // irreversible actions to the authenticated web app; skip drafted actions;
 // trigger local runs. Auth is the same personal
 // access token the CLI uses (config file or POSTSHOW_TOKEN).
@@ -53,6 +53,30 @@ export async function runMcpServer(): Promise<number> {
       annotations: { readOnlyHint: true },
     },
     async () => json(await gateway(config, 'workspace.get'))
+  );
+
+  server.registerTool(
+    'list-customer-incidents',
+    {
+      title: 'List customer incidents',
+      description:
+        'Source-grounded customer incidents with replay evidence, account and revenue exposure, suspected cause, intervention state, and verification contract.',
+      inputSchema: { limit: z.number().int().max(200).optional() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ limit }) => json(await gateway(config, 'incidents.list', { limit }))
+  );
+
+  server.registerTool(
+    'get-customer-incident',
+    {
+      title: 'Get one customer incident',
+      description:
+        'Read the complete incident dossier and its linked account, observation, and proposed-intervention records.',
+      inputSchema: { incident_id: z.string().uuid() },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ incident_id }) => json(await gateway(config, 'incidents.get', { incident_id }))
   );
 
   server.registerTool(

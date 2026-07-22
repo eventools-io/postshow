@@ -19,7 +19,7 @@ const COMPONENTS = [
   {
     path: 'apps/postshow',
     name: 'Web product',
-    detail: 'The public site, current workspace UI, and target incident-review preview.',
+    detail: 'The public site, authenticated incident review, and synthetic full-loop walkthrough.',
   },
   {
     path: 'apps/postshow-desktop',
@@ -67,10 +67,11 @@ export function OpenSourcePage() {
           <em className="block font-normal italic text-shell-fg-3">Help improve the loop.</em>
         </h1>
         <p className="m-0 mt-6 max-w-[66ch] font-public-sans text-[16px] leading-[1.65] text-shell-fg-2">
-          Postshow is being built to connect product evidence to affected customers, proposed
-          interventions, and a measured outcome. Today this repository contains the evidence engine,
-          draft-review clients, and a synthetic preview of the target incident flow. The web app,
-          desktop runtime, CLI, MCP server, and shared engine are MIT licensed.
+          Postshow connects product evidence to affected customers, proposed interventions, and a
+          verification plan. This repository contains the shared evidence and identity engine, the
+          incident-review web client, local runtime, CLI, MCP server, desktop agent, and a synthetic
+          walkthrough of the full recovery loop. Automated fix preparation and measured outcomes are
+          still being built. All of these components are MIT licensed.
         </p>
         <div className="mt-8 flex flex-wrap gap-3">
           <a href={REPOSITORY_URL} className="mk-btn-dark" target="_blank" rel="noreferrer">

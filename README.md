@@ -1,17 +1,19 @@
-# Postshow
+<p>
+  <img src="assets/postshow-logo.svg" alt="Postshow" width="246">
+</p>
 
-Postshow is becoming the customer-incident agent for B2B software teams. The target product connects product behavior to affected accounts and revenue, prepares the product fix and customer response, and then checks whether the intervention worked.
+Postshow is a customer-incident agent for B2B software teams. The current incident spine connects source-grounded product behavior to affected accounts and revenue, keeps proposed interventions beside the evidence, and records the verification plan. Automated product-fix preparation and measured post-intervention outcomes are the next part of the loop.
 
 [Website](https://postshow.io) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
 
-## The product direction
+## The product loop
 
 ```text
 customer behavior → account and revenue impact → product cause
         → human-reviewed fix and follow-up → measured outcome
 ```
 
-A Postshow customer incident will keep the evidence, affected accounts, proposed actions, and verification result together. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
+A Postshow customer incident keeps replay evidence, affected accounts, current revenue exposure, a suspected product cause, proposed actions, and the verification contract together. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
 
 Postshow is in closed beta. Provisioned workspaces can use the open clients and local runtime with their own model key or Ollama; the repository does not yet provide a standalone workspace control plane. Managed cloud availability is gated while the complete incident-to-recovery loop is validated.
 

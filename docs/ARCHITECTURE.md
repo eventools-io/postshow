@@ -4,7 +4,7 @@ This document is the shortest path from a product problem to the right package a
 
 ## Target product flow
 
-This is the v-next contract Postshow is working toward. It is not yet a persisted incident entity in the current engine.
+The Phase 1 incident spine is now persisted: source-grounded replay evidence, deterministic account identities, customer impact, suspected cause, proposed interventions, and a verification contract share one tenant-safe dossier. Automated code-fix preparation and measured post-intervention outcomes remain later phases.
 
 ```text
 PostHog / Stripe / GitHub / Sentry
@@ -41,7 +41,7 @@ The desktop app delegates secure configuration, credential-store access, and loc
 
 ## Current contract
 
-The current `ModelOutput` contract produces a summary, field notes, inbox items, account updates, an optional proposed job, an optional proposed rule, and scratchpad updates. Inbox actions can draft email, GitHub issue, or Linear issue work for human review, or propose adopting a rule. There is no persisted parent incident, code-fix or pull-request action, identity-resolution contract, or post-intervention outcome record yet.
+The current `ModelOutput` contract produces a summary, source-grounded field notes and inbox items, account updates, an optional proposed job, an optional proposed rule, and scratchpad updates. A deterministic identity context—not the model—maps exact Stripe identities and unambiguous PostHog sessions to accounts. The hosted commit materializes a parent customer incident with replay evidence, current revenue exposure, a suspected cause, proposed interventions, and a verification contract. Inbox actions can draft email, GitHub issue, or Linear issue work for human review, or propose adopting a rule. Code-fix/pull-request actions and measured post-intervention outcomes are not implemented yet.
 
 The v-next work will introduce those pieces deliberately. Until then, public previews must identify the unified incident and verification flow as the closed-beta target rather than current product behavior.
 
@@ -75,7 +75,7 @@ pnpm --filter postshow type-check
 
 ### `apps/postshow`
 
-Owns the public site, authentication, current workspace UI, the target incident-review preview, billing presentation, and browser calls to the hosted API. It must treat API responses as untrusted boundaries and keep private artifacts out of persistent browser storage.
+Owns the public site, authentication, incident-review workspace UI, synthetic full-loop walkthrough, billing presentation, and browser calls to the hosted API. It must treat API responses as untrusted boundaries and keep private artifacts out of persistent browser storage.
 
 Run:
 

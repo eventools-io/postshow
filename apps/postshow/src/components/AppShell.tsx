@@ -5,6 +5,7 @@ import { fetchEngine, fetchInbox } from '@/lib/api';
 import { Logo } from '@/components/Logo';
 
 const NAV = [
+  { to: '/incidents', label: 'Incidents', end: false },
   { to: '/inbox', label: 'Inbox', end: false },
   { to: '/accounts', label: 'Accounts', end: false },
   { to: '/field-notes', label: 'Field notes', end: false },

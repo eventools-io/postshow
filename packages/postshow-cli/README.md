@@ -75,9 +75,9 @@ Give your coding agent access to the workspace:
 
 After the npm release, `"command": "npx"` with `"args": ["-y", "postshow", "mcp"]` will be the shorter equivalent.
 
-Tools: `workspace-status`, `list-inbox`, `review-action-in-web`, `skip-action`, `list-accounts`, `list-field-notes`, `list-jobs`, `list-runs`, `run-local-jobs`, `get-scratchpad`.
+Tools: `workspace-status`, `list-customer-incidents`, `get-customer-incident`, `list-inbox`, `review-action-in-web`, `skip-action`, `list-accounts`, `list-field-notes`, `list-jobs`, `list-runs`, `run-local-jobs`, `get-scratchpad`.
 
-Those tools can return scoped workspace data, including account and revenue context, notes, inbox items, runs, and scratchpad content. Connect only a trusted MCP client. Its model provider and retention policy govern any data it receives. Tokens remain workspace-scoped; revoke the workspace token if a client or machine is no longer trusted.
+Those tools can return scoped workspace data, including incident replay evidence, account and revenue context, suspected product causes, verification plans, notes, inbox items, runs, and scratchpad content. Connect only a trusted MCP client. Its model provider and retention policy govern any data it receives. Tokens remain workspace-scoped; revoke the workspace token if a client or machine is no longer trusted.
 
 ## Configuration
 

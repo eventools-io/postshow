@@ -1,6 +1,6 @@
 # Postshow
 
-> Postshow is a closed-beta product by Eventools LLC (https://eventools.io). It is being built to connect product behavior to affected accounts and revenue, prepare product and customer interventions for human review, and check whether the outcome improved.
+> Postshow is a closed-beta product by Eventools LLC (https://eventools.io). Its current incident spine connects source-grounded product behavior to affected accounts and revenue, keeps product and customer interventions under human review, and records how the outcome will be checked. Automated fix preparation and measured post-intervention outcomes are still being built.
 
 Key facts:
 

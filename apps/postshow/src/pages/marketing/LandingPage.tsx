@@ -21,8 +21,8 @@ const STEPS = [
   },
   {
     number: '03',
-    title: 'Review, act, and verify',
-    body: 'Review the product fix and customer response together. After the intervention, Postshow checks whether the behavior recovered.',
+    title: 'Plan the intervention',
+    body: 'The current dossier records a verification plan beside human-reviewed issue and customer-response drafts. Code fixes and measured outcome checks are next.',
   },
 ];
 
@@ -41,15 +41,15 @@ const CAPABILITIES = [
   },
   {
     number: '03',
-    tag: 'Repair',
-    title: 'One review for both sides',
-    body: 'Review the code fix beside the account follow-up. Nothing merges or sends without a human decision.',
+    tag: 'Plan',
+    title: 'One contract for both sides',
+    body: 'Review proposed issue and account follow-up drafts beside the verification plan. Nothing files or sends without a human decision.',
   },
   {
     number: '04',
-    tag: 'Outcome',
+    tag: 'Next',
     title: 'Proof after the work ships',
-    body: 'Postshow reruns the evidence check and reports whether the customer behavior improved, stayed flat, or needs another intervention.',
+    body: 'Measured post-intervention checks are the next part of the loop: rerun the evidence and report whether behavior improved, stayed flat, or needs another intervention.',
   },
 ];
 
@@ -200,9 +200,10 @@ function DemoSection() {
           <em className="font-normal italic text-shell-fg-3">Click around in it.</em>
         </h2>
         <p className="m-0 mt-4 font-public-sans text-[15px] leading-[1.55] text-shell-fg-2">
-          This interactive mock shows the target review flow with synthetic data. The current
-          contract supports evidence gathering and draft review; the unified incident and outcome
-          record is the closed-beta direction.
+          This synthetic walkthrough shows the whole loop. In the authenticated beta, Postshow now
+          persists replay evidence, account impact, suspected cause, proposed interventions, and a
+          verification plan in one incident. Automated fix preparation and measured outcomes are
+          still being built.
         </p>
       </div>
       <div className="mt-10">
@@ -242,7 +243,7 @@ function CapabilitiesSlab() {
     <section className="mx-auto max-w-[1160px] px-4 pb-24">
       <div className="rounded-xl bg-night-0 px-6 py-14 md:px-14 md:py-20">
         <div className="mx-auto max-w-[560px] text-center">
-          <p className="mk-eyebrow m-0 text-night-fg-3">the target incident contract</p>
+          <p className="mk-eyebrow m-0 text-night-fg-3">the incident contract</p>
           <h2 className="m-0 mt-3 font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-night-fg">
             One customer incident,
             <br />

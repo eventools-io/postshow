@@ -28,6 +28,12 @@ const InvitePage = lazy(() =>
   import('./pages/InvitePage').then((m) => ({ default: m.InvitePage }))
 );
 const InboxPage = lazy(() => import('./pages/InboxPage').then((m) => ({ default: m.InboxPage })));
+const IncidentsPage = lazy(() =>
+  import('./pages/IncidentsPage').then((m) => ({ default: m.IncidentsPage }))
+);
+const IncidentPage = lazy(() =>
+  import('./pages/IncidentPage').then((m) => ({ default: m.IncidentPage }))
+);
 const AccountsPage = lazy(() =>
   import('./pages/AccountsPage').then((m) => ({ default: m.AccountsPage }))
 );
@@ -73,6 +79,7 @@ function RouteFallback() {
 const DELETION_RECOVERY_ROUTES = new Set([
   '/signin',
   '/inbox',
+  '/incidents',
   '/accounts',
   '/field-notes',
   '/work-plan',
@@ -82,7 +89,9 @@ const DELETION_RECOVERY_ROUTES = new Set([
 
 function RouteScopedDeletionReceiptRecovery() {
   const { pathname } = useLocation();
-  return DELETION_RECOVERY_ROUTES.has(pathname) ? <DeletionReceiptRecovery /> : null;
+  return DELETION_RECOVERY_ROUTES.has(pathname) || pathname.startsWith('/incidents/') ? (
+    <DeletionReceiptRecovery />
+  ) : null;
 }
 
 export default function App(): ReactElement {
@@ -108,6 +117,8 @@ export default function App(): ReactElement {
               }
             >
               <Route path="inbox" element={<InboxPage />} />
+              <Route path="incidents" element={<IncidentsPage />} />
+              <Route path="incidents/:incidentId" element={<IncidentPage />} />
               <Route path="accounts" element={<AccountsPage />} />
               <Route path="field-notes" element={<FieldNotesPage />} />
               <Route path="work-plan" element={<WorkPlanPage />} />

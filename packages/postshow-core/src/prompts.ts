@@ -11,6 +11,9 @@ export interface ModelOutput {
     title?: string;
     detail?: string;
     sessions?: number;
+    session_ids?: string[];
+    account_identity_keys?: string[];
+    root_cause_hypothesis?: string;
     severity?: string;
     fingerprint?: string;
   }[];
@@ -23,7 +26,10 @@ export interface ModelOutput {
     action_type?: string;
     action_config?: Record<string, unknown>;
     account_name?: string;
+    session_ids?: string[];
+    account_identity_keys?: string[];
     fingerprint?: string;
+    incident_fingerprint?: string;
   }[];
   account_updates?: {
     name?: string;
@@ -48,6 +54,8 @@ export const OUTPUT_LIMITS = {
   inboxItems: 3,
   accountUpdates: 20,
   scratchpadUpdates: 4,
+  sessionIds: 20,
+  accountIdentityKeys: 20,
   ruleChars: 300,
   summaryChars: 600,
 } as const;
@@ -73,10 +81,10 @@ export const STATUS_TONES = new Set(['good', 'warn', 'bad']);
 const OUTPUT_CONTRACT = [
   'Return ONLY a JSON object with these keys:',
   '- summary: string, 2 sentences max, plain language, outcome first.',
-  '- field_notes: array of {title, detail, sessions, severity, fingerprint}.',
+  '- field_notes: array of {title, detail, sessions, session_ids, account_identity_keys, root_cause_hypothesis, severity, fingerprint}.',
   `  At most ${OUTPUT_LIMITS.fieldNotes}, ranked by sessions affected. severity is high|medium|low.`,
   '- inbox_items: array of {kind, meta, title, body, evidence, action_type,',
-  '  action_config, account_name, fingerprint}. kind is one of',
+  '  action_config, account_name, session_ids, account_identity_keys, fingerprint, incident_fingerprint}. kind is one of',
   '  outreach|ticket|save_play|expansion|activation|other. action_type is one',
   '  of email|github_issue|linear_issue|none; email may include action_config',
   `  {subject}. Never choose a recipient or external destination; a human binds that during approval. At most ${OUTPUT_LIMITS.inboxItems}, and only when clearly worth a human action.`,
@@ -102,6 +110,14 @@ const EVIDENCE_RULES = [
   '  to what the account did, no marketing voice.',
   '- Fingerprints are stable kebab-case slugs describing the finding, so the',
   '  same finding on a later run gets the same fingerprint.',
+  '- An inbox item uses its own action fingerprint and incident_fingerprint',
+  '  cites the related field-note fingerprint so both share one dossier.',
+  '- session_ids contains only exact full session ids copied from the packet.',
+  `  Never invent, shorten, or transform an id; include at most ${OUTPUT_LIMITS.sessionIds}.`,
+  '- account_identity_keys contains only exact account identity keys copied',
+  `  from the packet. Never derive one from an account name; include at most ${OUTPUT_LIMITS.accountIdentityKeys}.`,
+  '- root_cause_hypothesis is a concise suspected product cause grounded in',
+  '  the supplied product/error/code evidence. Say "unverified" when the packet cannot support one.',
   '- An empty inbox_items array is a good outcome. When nothing clears the',
   '  bar of "the founder would click send", abstain: report field notes or',
   '  nothing at all rather than padding the queue.',
@@ -145,9 +161,9 @@ const TASK_FOCUS: Record<TaskClass, string> = {
 
 export function agentSystemPrompt(taskClass: TaskClass): string {
   return [
-    'You are Postshow, an AI customer-intelligence analyst for a B2B SaaS',
-    'team. You watched their product sessions and read their revenue and',
-    'error data. Your only output is action: a queue a human can approve.',
+    'You are Postshow, a customer-incident agent for a B2B SaaS team. You',
+    'watched their product sessions and read their revenue, error, and code',
+    'data. Build evidence-backed findings and actions a human can review.',
     '',
     TASK_FOCUS[taskClass],
     '',

@@ -16,6 +16,8 @@ import {
   resolveTaskEngine,
   sanitizeModelOutput,
   sentryGather,
+  sourceIdentityContext,
+  stripeSourceAccounts,
   stripeGather,
   taskClassForJobKind,
   type GatherCompleteness,
@@ -640,7 +642,16 @@ export async function executeLocalJob(
     // The model is an untrusted boundary. Sanitize before the Postshow call so
     // unknown keys cannot reach the gateway or workspace storage; the gateway
     // repeats this sanitization as defense in depth.
-    const output = sanitizeModelOutput(dependencies.parseModelJson(result.text));
+    const gatheredPosthog = posthog as PosthogGather | null;
+    const sourceAccounts = stripeSourceAccounts(stripe);
+    const identityContext = sourceIdentityContext(gatheredPosthog, stripe);
+    const output = sanitizeModelOutput(dependencies.parseModelJson(result.text), {
+      allowedSessionIds: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
+      allowedAccountIdentityKeys: sourceAccounts.map((account) => account.identityKey),
+      sessionAccountIdentityKeys: identityContext.sessions.map(
+        (session) => [session.sessionId, session.accountIdentityKey] as const
+      ),
+    });
     heartbeat.checkpoint();
 
     phase = 'submit';
@@ -656,6 +667,9 @@ export async function executeLocalJob(
         task_class: taskClass,
         status: 'ok',
         output,
+        source_accounts: sourceAccounts,
+        source_session_ids: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
+        identity_context: identityContext,
         engine: engineLabel,
         sessions_watched: sessionsWatched,
         usage: {

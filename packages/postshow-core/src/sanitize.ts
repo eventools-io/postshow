@@ -16,6 +16,9 @@ export interface CleanFieldNote {
   title: string;
   detail: string;
   sessions: number;
+  session_ids: string[];
+  account_identity_keys: string[];
+  root_cause_hypothesis: string;
   severity: string;
   fingerprint: string;
 }
@@ -30,7 +33,10 @@ export interface CleanInboxItem {
   action_type: string;
   action_config: Record<string, unknown>;
   account_name: string;
+  session_ids: string[];
+  account_identity_keys: string[];
   fingerprint: string;
+  incident_fingerprint: string;
 }
 
 export interface CleanAccountUpdate {
@@ -97,6 +103,37 @@ function text(value: unknown, max: number): string {
   return typeof value === 'string' ? stripUnsafeControlCharacters(value).slice(0, max) : '';
 }
 
+const SESSION_ID = /^[A-Za-z0-9_-]{6,160}$/;
+
+export function canonicalSessionId(value: unknown): string | null {
+  return typeof value === 'string' && SESSION_ID.test(value) ? value : null;
+}
+
+function sessionIds(value: unknown, allowed: ReadonlySet<string>): string[] {
+  const unique = new Set<string>();
+  for (const candidate of array(value)) {
+    const id = canonicalSessionId(candidate);
+    if (!id || !allowed.has(id)) continue;
+    unique.add(id);
+    if (unique.size >= OUTPUT_LIMITS.sessionIds) break;
+  }
+  return [...unique];
+}
+
+function groundedAccountIdentityKeys(
+  citedSessions: readonly string[],
+  accountsBySession: ReadonlyMap<string, string>
+): string[] {
+  const unique = new Set<string>();
+  for (const sessionId of citedSessions) {
+    const accountIdentityKey = accountsBySession.get(sessionId);
+    if (!accountIdentityKey) continue;
+    unique.add(accountIdentityKey);
+    if (unique.size >= OUTPUT_LIMITS.accountIdentityKeys) break;
+  }
+  return [...unique];
+}
+
 function actionConfig(actionType: string, value: unknown): Record<string, unknown> {
   const raw = record(value);
   if (actionType === 'email') {
@@ -110,8 +147,37 @@ function actionConfig(actionType: string, value: unknown): Record<string, unknow
   return {};
 }
 
-export function sanitizeModelOutput(output: ModelOutput | unknown): CleanOutput {
+export function sanitizeModelOutput(
+  output: ModelOutput | unknown,
+  options: {
+    allowedSessionIds: Iterable<string>;
+    allowedAccountIdentityKeys: Iterable<string>;
+    sessionAccountIdentityKeys?: Iterable<readonly [string, string]>;
+  }
+): CleanOutput {
   const rawOutput = record(output);
+  const allowedSessionIds = new Set(
+    Array.from(options.allowedSessionIds ?? []).flatMap((value) => {
+      const id = canonicalSessionId(value);
+      return id ? [id] : [];
+    })
+  );
+  const allowedAccountIdentityKeys = new Set(
+    Array.from(options.allowedAccountIdentityKeys).filter((value) =>
+      /^stripe:[A-Za-z0-9_-]{1,200}$/.test(value)
+    )
+  );
+  const accountsBySession = new Map<string, string>();
+  for (const [rawSessionId, rawAccountIdentityKey] of options.sessionAccountIdentityKeys ?? []) {
+    const sessionId = canonicalSessionId(rawSessionId);
+    if (
+      sessionId &&
+      allowedSessionIds.has(sessionId) &&
+      allowedAccountIdentityKeys.has(rawAccountIdentityKey)
+    ) {
+      accountsBySession.set(sessionId, rawAccountIdentityKey);
+    }
+  }
   const fieldNotes: CleanFieldNote[] = [];
   for (const value of array(rawOutput.field_notes).slice(0, OUTPUT_LIMITS.fieldNotes)) {
     const note = record(value);
@@ -119,18 +185,23 @@ export function sanitizeModelOutput(output: ModelOutput | unknown): CleanOutput 
     const fingerprint = text(note.fingerprint, 120);
     if (!title || !fingerprint) continue;
     const sessions = Number(note.sessions ?? 0);
+    const groundedSessionIds = sessionIds(note.session_ids, allowedSessionIds);
     fieldNotes.push({
       title,
       detail: text(note.detail, 2000),
       sessions: Number.isFinite(sessions)
         ? Math.min(1_000_000_000, Math.max(0, Math.round(sessions)))
         : 0,
+      session_ids: groundedSessionIds,
+      account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
+      root_cause_hypothesis: text(note.root_cause_hypothesis, 1000),
       severity: SEVERITIES.has(String(note.severity ?? '')) ? String(note.severity) : 'medium',
       fingerprint,
     });
   }
 
   const inboxItems: CleanInboxItem[] = [];
+  const allowedIncidentFingerprints = new Set(fieldNotes.map((note) => note.fingerprint));
   for (const value of array(rawOutput.inbox_items).slice(0, OUTPUT_LIMITS.inboxItems)) {
     const item = record(value);
     const title = text(item.title, 300);
@@ -142,6 +213,7 @@ export function sanitizeModelOutput(output: ModelOutput | unknown): CleanOutput 
       ACTION_TYPES.has(requestedAction) && requestedAction !== 'adopt_rule'
         ? requestedAction
         : 'none';
+    const groundedSessionIds = sessionIds(item.session_ids, allowedSessionIds);
     inboxItems.push({
       kind: INBOX_KINDS.has(String(item.kind ?? '')) ? String(item.kind) : 'other',
       meta: text(item.meta, 200),
@@ -152,7 +224,12 @@ export function sanitizeModelOutput(output: ModelOutput | unknown): CleanOutput 
       action_type: actionType,
       action_config: actionConfig(actionType, item.action_config),
       account_name: text(item.account_name, 200),
+      session_ids: groundedSessionIds,
+      account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
       fingerprint: text(item.fingerprint, 120),
+      incident_fingerprint: allowedIncidentFingerprints.has(text(item.incident_fingerprint, 120))
+        ? text(item.incident_fingerprint, 120)
+        : '',
     });
   }
 

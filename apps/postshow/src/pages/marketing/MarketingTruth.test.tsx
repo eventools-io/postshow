@@ -10,16 +10,19 @@ function renderPage(page: React.ReactNode) {
 }
 
 describe('public product claims', () => {
-  it('leads with a supported evidence stack and labels the recovery loop as the target', () => {
+  it('leads with the current incident spine and labels automation as the target', () => {
     renderPage(<LandingPage />);
 
     for (const source of ['PostHog', 'Stripe', 'GitHub', 'Sentry']) {
       expect(screen.getAllByText(source).length).toBeGreaterThan(0);
     }
     expect(document.body).toHaveTextContent(/affected accounts and revenue/i);
-    expect(document.body).toHaveTextContent(/checks? whether the intervention worked/i);
+    expect(document.body).toHaveTextContent(/measured outcome checks are next/i);
     expect(document.body).toHaveTextContent(/the loop we.re building/i);
-    expect(document.body).toHaveTextContent(/target incident contract/i);
+    expect(document.body).toHaveTextContent(/the incident contract/i);
+    expect(document.body).toHaveTextContent(
+      /automated fix preparation and measured outcomes are still being built/i
+    );
     expect(
       screen
         .getAllByRole('link', { name: /github/i })

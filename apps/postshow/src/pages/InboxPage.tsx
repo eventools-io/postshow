@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useWorkspace } from '@/state/WorkspaceContext';
 import {
   fetchInbox,
@@ -7,22 +8,27 @@ import {
   executeInboxAction,
   updateInboxDraft,
   fetchWorkspacePermissions,
+  fetchPosthogReplayConfig,
   type ActionPreview,
 } from '@/lib/api';
 import { usePageData } from '@/lib/usePageData';
 import { PageHeader, EmptyState, LoadingRow, ErrorRow, Section } from '@/components/page';
 import { track } from '@/lib/analytics';
 import type { InboxItem } from '@/lib/types';
+import type { PosthogReplayConfig } from '@/lib/types';
+import { ReplayLinks } from '@/components/ReplayLinks';
 
 function ItemRow({
   item,
   canOperate,
   canApprove,
+  replay,
   onChanged,
 }: {
   item: InboxItem;
   canOperate: boolean;
   canApprove: boolean;
+  replay: PosthogReplayConfig | null;
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -124,6 +130,17 @@ function ItemRow({
           >
             {item.evidence || 'no evidence recorded'} {expanded ? '▲' : '▼'}
           </button>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <ReplayLinks sessionIds={item.session_ids ?? []} config={replay} />
+            {item.incident_id ? (
+              <Link
+                to={`/incidents/${item.incident_id}`}
+                className="font-public-mono text-[10px] uppercase tracking-[0.1em] text-signal hover:text-night-fg"
+              >
+                review incident →
+              </Link>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 gap-2">
           {canApprove ? (
@@ -296,6 +313,8 @@ export function InboxPage() {
   const workspaceId = workspace?.id ?? '';
   const fetcher = useCallback(() => fetchInbox(workspaceId), [workspaceId]);
   const { data, loading, error, reload } = usePageData(fetcher);
+  const replayFetcher = useCallback(() => fetchPosthogReplayConfig(workspaceId), [workspaceId]);
+  const { data: replay } = usePageData(replayFetcher);
   const permissionsFetcher = useCallback(
     () => fetchWorkspacePermissions(workspaceId),
     [workspaceId]
@@ -364,6 +383,7 @@ export function InboxPage() {
               item={item}
               canOperate={canOperate}
               canApprove={canApprove}
+              replay={replay}
               onChanged={reload}
             />
           ))}

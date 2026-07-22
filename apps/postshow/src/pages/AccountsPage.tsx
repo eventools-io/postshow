@@ -1,9 +1,11 @@
 import { useCallback, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useWorkspace } from '@/state/WorkspaceContext';
-import { fetchAccounts } from '@/lib/api';
+import { fetchAccounts, fetchAccountIncidentLinks, fetchPosthogReplayConfig } from '@/lib/api';
 import { usePageData } from '@/lib/usePageData';
 import { PageHeader, EmptyState, LoadingRow, ErrorRow } from '@/components/page';
-import type { Account } from '@/lib/types';
+import { ReplayLinks } from '@/components/ReplayLinks';
+import type { Account, AccountIncidentLink, PosthogReplayConfig } from '@/lib/types';
 
 const TONE_CLASS = { good: 'bg-signal', warn: 'bg-warn', bad: 'bg-bad' } as const;
 
@@ -12,7 +14,15 @@ function formatMrr(cents: number | null): string {
   return `$${Math.round(cents / 100).toLocaleString()}/mo`;
 }
 
-function AccountRow({ account }: { account: Account }) {
+function AccountRow({
+  account,
+  incidents,
+  replay,
+}: {
+  account: Account;
+  incidents: AccountIncidentLink[];
+  replay: PosthogReplayConfig | null;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <li className="border-b border-night-3 last:border-b-0">
@@ -53,6 +63,21 @@ function AccountRow({ account }: { account: Account }) {
               {account.next_move}
             </p>
           )}
+          {incidents.length > 0 ? (
+            <div className="mt-2 flex flex-col gap-1 border-t border-night-3 pt-3">
+              {incidents.map((incident) => (
+                <div key={incident.incident_id} className="flex flex-wrap items-center gap-2">
+                  <Link
+                    to={`/incidents/${incident.incident_id}`}
+                    className="font-public-sans text-[12px] text-signal hover:text-night-fg"
+                  >
+                    {incident.title} · {incident.lifecycle_state.replaceAll('_', ' ')} →
+                  </Link>
+                  <ReplayLinks sessionIds={incident.session_ids} config={replay} />
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       )}
     </li>
@@ -64,6 +89,10 @@ export function AccountsPage() {
   const workspaceId = workspace?.id ?? '';
   const fetcher = useCallback(() => fetchAccounts(workspaceId), [workspaceId]);
   const { data, loading, error } = usePageData(fetcher);
+  const incidentFetcher = useCallback(() => fetchAccountIncidentLinks(workspaceId), [workspaceId]);
+  const { data: incidentLinks } = usePageData(incidentFetcher);
+  const replayFetcher = useCallback(() => fetchPosthogReplayConfig(workspaceId), [workspaceId]);
+  const { data: replay } = usePageData(replayFetcher);
   const accounts = data ?? [];
 
   return (
@@ -84,7 +113,12 @@ export function AccountsPage() {
       {accounts.length > 0 && (
         <ul className="ps-card m-0 list-none overflow-hidden p-0">
           {accounts.map((account) => (
-            <AccountRow key={account.id} account={account} />
+            <AccountRow
+              key={account.id}
+              account={account}
+              incidents={(incidentLinks ?? []).filter((link) => link.account_id === account.id)}
+              replay={replay ?? null}
+            />
           ))}
         </ul>
       )}

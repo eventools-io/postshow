@@ -5,6 +5,7 @@
 // stays in the edge runtime.
 
 import { isUnsafePublicHostname } from './network';
+import { canonicalSessionId } from './sanitize';
 
 export const ADAPTER_TIMEOUT_MS = 20_000;
 const MAX_ADAPTER_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -164,6 +165,7 @@ function completeness(
 export interface SessionSample {
   sid: string;
   email: string;
+  distinctId: string;
   started: string;
   seconds: number;
   events: number;
@@ -283,7 +285,8 @@ export async function posthogGather(
   const samples = await hogql(
     config,
     `SELECT properties.$session_id AS sid,
-            any(person.properties.email) AS email,
+            argMin(person.properties.email, timestamp) AS email,
+            argMin(toString(distinct_id), timestamp) AS distinct_id,
             toString(min(timestamp)) AS started,
             dateDiff('second', min(timestamp), max(timestamp)) AS seconds,
             count() AS events,
@@ -297,16 +300,23 @@ export async function posthogGather(
      LIMIT ${limit}`
   );
 
-  const sampleRows = samples.map((row) => ({
-    sid: String(row[0] ?? ''),
-    email: String(row[1] ?? ''),
-    started: String(row[2] ?? ''),
-    seconds: Number(row[3] ?? 0),
-    events: Number(row[4] ?? 0),
-    firstEvents: (row[5] as string[]) ?? [],
-    rages: Number(row[6] ?? 0),
-    errors: Number(row[7] ?? 0),
-  }));
+  const sampleRows = samples.flatMap((row) => {
+    const sid = canonicalSessionId(row[0]);
+    if (!sid) return [];
+    return [
+      {
+        sid,
+        email: String(row[1] ?? ''),
+        distinctId: String(row[2] ?? ''),
+        started: String(row[3] ?? ''),
+        seconds: Number(row[4] ?? 0),
+        events: Number(row[5] ?? 0),
+        firstEvents: (row[6] as string[]) ?? [],
+        rages: Number(row[7] ?? 0),
+        errors: Number(row[8] ?? 0),
+      },
+    ];
+  });
   const sessionCount = Number(topline[0]?.[0] ?? 0);
   const sampled = sessionCount > sampleRows.length;
   return {
@@ -905,7 +915,7 @@ export function packetSections(input: {
       `SESSION SAMPLES (worst first; firstEvents is the ordered event stream):\n${p.samples
         .map(
           (s) =>
-            `  [${s.sid.slice(0, 8)}] ${s.email ? 'identified user' : 'anonymous'} · ${s.seconds}s · ${s.events} events · rages=${s.rages} errors=${s.errors} · ${s.firstEvents.join('>')}`
+            `  [session_id=${s.sid}] ${s.email ? 'identified user' : 'anonymous'} · ${s.seconds}s · ${s.events} events · rages=${s.rages} errors=${s.errors} · ${s.firstEvents.join('>')}`
         )
         .join('\n')}`
     );
@@ -922,7 +932,8 @@ export function packetSections(input: {
       `REVENUE (stripe subscriptions; highest MRR first):\n${
         presented
           .map(
-            (a) => `  ${a.name} · ${a.status} · ${a.currency} ${(a.mrrCents / 100).toFixed(0)}/mo`
+            (a) =>
+              `  [account_identity_key=stripe:${a.customerId}] ${a.name} · ${a.status} · ${a.currency} ${(a.mrrCents / 100).toFixed(0)}/mo`
           )
           .join('\n') || '  none'
       }`

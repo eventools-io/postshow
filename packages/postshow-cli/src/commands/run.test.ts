@@ -176,7 +176,15 @@ describe('local claim contract', () => {
       },
     });
     expect(commits[0]?.args).not.toHaveProperty('job_id');
-    expect(commits[0]?.args).not.toHaveProperty('source_accounts');
+    expect(commits[0]?.args).toMatchObject({
+      source_accounts: [],
+      source_session_ids: [],
+      identity_context: {
+        links: [],
+        sessions: [],
+        completeness: { complete: true, sampled: false },
+      },
+    });
     expect(summary.jobs[0]?.detail).toBe('2 draft(s), 3 field note(s) synced');
   });
 
@@ -225,6 +233,7 @@ describe('local claim contract', () => {
     expect(serialized).not.toContain('must-not-leave-device');
     expect(submit?.args.output).not.toHaveProperty('source_accounts');
     expect(submit?.args.output).not.toHaveProperty('sourceAccounts');
+    expect(submit?.args.source_accounts).toEqual([]);
   });
 
   it('uses the atomic optional job_id claim for a targeted run', async () => {

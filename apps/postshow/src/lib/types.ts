@@ -170,6 +170,9 @@ export interface InboxItem {
   state: InboxState;
   resolution: Record<string, unknown>;
   resolved_at: string | null;
+  session_ids: string[];
+  account_identity_keys: string[];
+  incident_id: string | null;
   created_at: string;
 }
 
@@ -197,7 +200,88 @@ export interface FieldNote {
   severity: 'high' | 'medium' | 'low';
   source: string;
   state: 'open' | 'drafted' | 'dismissed';
+  session_ids: string[];
+  account_identity_keys: string[];
+  root_cause_hypothesis: string;
+  incident_id: string | null;
+  run_id: string | null;
   created_at: string;
+}
+
+export type IncidentLifecycle =
+  | 'investigating'
+  | 'intervention_pending'
+  | 'monitoring'
+  | 'resolved'
+  | 'inconclusive'
+  | 'closed';
+
+export interface CustomerIncident {
+  id: string;
+  workspace_id: string;
+  fingerprint: string;
+  title: string;
+  summary: string;
+  lifecycle_state: IncidentLifecycle;
+  severity: 'high' | 'medium' | 'low';
+  revenue_exposure_cents: number | null;
+  currency: string;
+  evidence_refs: {
+    session_ids?: string[];
+    account_identity_keys?: string[];
+    source_coverage?: {
+      complete?: boolean;
+      sampled?: boolean;
+      matchedSessions?: number;
+      unmatchedSessions?: number;
+      ambiguousEmails?: number;
+      conflictingDistinctIds?: number;
+      reasons?: string[];
+    };
+  };
+  root_cause_hypothesis: { status?: 'suspected' | 'unverified'; summary?: string };
+  verification_contract: {
+    metric?: string;
+    baseline?: number;
+    direction?: string;
+    check_after_days?: number;
+    status?: string;
+  };
+  measured_outcome: { status?: string; [key: string]: unknown };
+  first_seen_at: string;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IncidentAccount {
+  workspace_id: string;
+  incident_id: string;
+  account_id: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+  account: Account;
+}
+
+export interface AccountIncidentLink {
+  account_id: string;
+  incident_id: string;
+  title: string;
+  lifecycle_state: IncidentLifecycle;
+  severity: 'high' | 'medium' | 'low';
+  session_ids: string[];
+}
+
+export interface IncidentDossier {
+  incident: CustomerIncident;
+  accounts: IncidentAccount[];
+  fieldNotes: FieldNote[];
+  inboxItems: InboxItem[];
+}
+
+export interface PosthogReplayConfig {
+  origin: string;
+  projectId: string;
 }
 
 export type JobStatus = 'active' | 'paused' | 'proposed' | 'vetoed' | 'done';

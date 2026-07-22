@@ -23,6 +23,7 @@ vi.mock('@/lib/api', () => ({
   previewInboxAction: vi.fn(),
   executeInboxAction: vi.fn(),
   updateInboxDraft: vi.fn(),
+  fetchPosthogReplayConfig: vi.fn(async () => null),
 }));
 
 vi.mock('@/state/WorkspaceContext', () => ({
@@ -56,6 +57,9 @@ function item(overrides: Partial<InboxItem>): InboxItem {
     resolved_at: null,
     created_at: new Date().toISOString(),
     ...overrides,
+    session_ids: overrides.session_ids ?? [],
+    account_identity_keys: overrides.account_identity_keys ?? [],
+    incident_id: overrides.incident_id ?? null,
   };
 }
 

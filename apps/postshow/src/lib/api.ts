@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { invokePostshowFunction } from './functionClient';
+import { posthogReplayConfig } from './replay';
 import type {
   Workspace,
   WorkspaceMember,
@@ -23,6 +24,11 @@ import type {
   WorkspaceInvitation,
   WorkspacePermissions,
   ActionType,
+  CustomerIncident,
+  IncidentDossier,
+  IncidentAccount,
+  PosthogReplayConfig,
+  AccountIncidentLink,
 } from './types';
 
 function throwing<T>(data: T | null, error: { message: string } | null): T {
@@ -142,6 +148,133 @@ export async function fetchFieldNotes(workspaceId: string): Promise<FieldNote[]>
     .order('sessions', { ascending: false })
     .limit(200);
   return throwing(data, error);
+}
+
+export async function fetchIncidents(workspaceId: string): Promise<CustomerIncident[]> {
+  const { data, error } = await supabase
+    .from('postshow_customer_incidents')
+    .select('*')
+    .eq('workspace_id', workspaceId)
+    .neq('lifecycle_state', 'closed')
+    .order('last_seen_at', { ascending: false })
+    .limit(200);
+  return throwing(data, error) as CustomerIncident[];
+}
+
+export async function fetchAccountIncidentLinks(
+  workspaceId: string
+): Promise<AccountIncidentLink[]> {
+  const [{ data: links, error: linksError }, { data: incidents, error: incidentsError }] =
+    await Promise.all([
+      supabase
+        .from('postshow_incident_accounts')
+        .select('account_id, incident_id')
+        .eq('workspace_id', workspaceId),
+      supabase
+        .from('postshow_customer_incidents')
+        .select('id, title, lifecycle_state, severity, evidence_refs')
+        .eq('workspace_id', workspaceId)
+        .neq('lifecycle_state', 'closed'),
+    ]);
+  if (linksError) throw new Error(linksError.message);
+  if (incidentsError) throw new Error(incidentsError.message);
+  const byId = new Map(
+    (incidents ?? []).map((incident) => [
+      incident.id,
+      incident as Omit<CustomerIncident, 'workspace_id'>,
+    ])
+  );
+  return (links ?? []).flatMap((link) => {
+    const incident = byId.get(link.incident_id);
+    return incident
+      ? [
+          {
+            account_id: link.account_id,
+            incident_id: link.incident_id,
+            title: incident.title,
+            lifecycle_state: incident.lifecycle_state,
+            severity: incident.severity,
+            session_ids: incident.evidence_refs?.session_ids ?? [],
+          },
+        ]
+      : [];
+  });
+}
+
+export async function fetchIncidentDossier(
+  workspaceId: string,
+  incidentId: string
+): Promise<IncidentDossier> {
+  const [{ data: incident, error: incidentError }, linksResult, notesResult, inboxResult] =
+    await Promise.all([
+      supabase
+        .from('postshow_customer_incidents')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('id', incidentId)
+        .maybeSingle(),
+      supabase
+        .from('postshow_incident_accounts')
+        .select('workspace_id, incident_id, account_id, confidence, evidence')
+        .eq('workspace_id', workspaceId)
+        .eq('incident_id', incidentId),
+      supabase
+        .from('postshow_field_notes')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('incident_id', incidentId)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('postshow_inbox_items')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('incident_id', incidentId)
+        .order('created_at', { ascending: false }),
+    ]);
+  if (incidentError) throw new Error(incidentError.message);
+  if (!incident) throw new Error('Incident not found.');
+  if (linksResult.error) throw new Error(linksResult.error.message);
+  if (notesResult.error) throw new Error(notesResult.error.message);
+  if (inboxResult.error) throw new Error(inboxResult.error.message);
+
+  const rawLinks = (linksResult.data ?? []) as Omit<IncidentAccount, 'account'>[];
+  const accountIds = rawLinks.map((link) => link.account_id);
+  let accounts: Account[] = [];
+  if (accountIds.length > 0) {
+    const { data, error } = await supabase
+      .from('postshow_accounts')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .in('id', accountIds);
+    if (error) throw new Error(error.message);
+    accounts = (data ?? []) as Account[];
+  }
+  const accountById = new Map(accounts.map((account) => [account.id, account]));
+  return {
+    incident: incident as CustomerIncident,
+    accounts: rawLinks.flatMap((link) => {
+      const account = accountById.get(link.account_id);
+      return account ? [{ ...link, account }] : [];
+    }),
+    fieldNotes: (notesResult.data ?? []) as FieldNote[],
+    inboxItems: (inboxResult.data ?? []) as InboxItem[],
+  };
+}
+
+export async function fetchPosthogReplayConfig(
+  workspaceId: string
+): Promise<PosthogReplayConfig | null> {
+  const { data, error } = await supabase
+    .from('postshow_connections')
+    .select('meta, status')
+    .eq('workspace_id', workspaceId)
+    .eq('provider', 'posthog')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data || data.status !== 'connected') return null;
+  const meta =
+    data.meta && typeof data.meta === 'object' ? (data.meta as Record<string, unknown>) : {};
+  return posthogReplayConfig(meta);
 }
 
 export async function draftTicketFromNote(noteId: string): Promise<void> {
