@@ -1,12 +1,13 @@
 # Contributing to Postshow
 
-Postshow welcomes public bug reports, documentation improvements, tests, connector work, and product changes to the open clients and engine.
+Postshow welcomes public bug reports, documentation improvements, tests, connector work, and product changes to the open clients and shared engine. The project is building one customer-incident loop from exact evidence to verified recovery.
 
 Do not include credentials, customer data, private logs, or confidential hosted-service context in an issue, fixture, commit, or pull request. Use [SUPPORT.md](SUPPORT.md) for private product help and [SECURITY.md](SECURITY.md) for vulnerabilities.
 
 ## Before you start
 
 - Search [open issues](https://github.com/eventools-io/postshow/issues) and pull requests.
+- Read the [product direction](docs/PRODUCT.md) and [public roadmap](docs/ROADMAP.md) before proposing a new product surface.
 - Comment on an issue before taking a large or user-visible change.
 - If the issue queue is empty, open a focused contribution proposal and wait for maintainer confirmation before doing substantial work.
 - Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing a shared contract.
@@ -48,9 +49,12 @@ These are product contracts, not preferences:
 - Connector reads remain least-scope and read-only by default.
 - Credentials never enter prompts, logs, fixtures, or browser storage.
 - Local-only sources keep credentials and raw records off Postshow cloud.
-- Customer messages never send without a human action.
-- Generated code never merges automatically.
+- Provider references must come from validated objects returned for the same workspace.
+- Models may propose a hypothesis or action but cannot certify evidence or set the incident decision.
+- Customer messages stay drafts and never send without a human action.
+- Generated code stays in draft pull requests and never merges automatically.
 - One connector failure must not fabricate evidence or erase healthy evidence from other sources.
+- Negative and inconclusive outcomes remain visible on the incident.
 - Unknown model prices and malformed usage data must fail accounting visibly.
 
 Changes that touch authentication, credentials, tenancy, model routing, exports, connector data, or outbound actions need focused tests and an explicit security note in the pull request.
@@ -102,5 +106,7 @@ Maintainers may ask to split a change when independent concerns need different r
 This is the development repository for the open components. CI and review happen here, and accepted contributions merge with their original authorship.
 
 The managed cloud runtime lives separately and pins an exact revision of `packages/postshow-core`. A core contribution reaches hosted Postshow when maintainers update and verify that pin. Contributors do not need access to the private runtime.
+
+The public core owns the meaning of incident evidence, identity, decisions, interventions, and outcomes. The managed runtime may add tenancy, scheduling, secrets, billing, and delivery metadata, but it must not maintain a private alternate evidence policy.
 
 By submitting a contribution, you agree that it is licensed under this repository's MIT license. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).

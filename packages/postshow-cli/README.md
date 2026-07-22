@@ -1,6 +1,6 @@
 # postshow
 
-The CLI for [Postshow](https://postshow.io), the closed-beta product by [eventools](https://eventools.io). It runs the current local evidence pipeline, exposes scoped workspace context over MCP, and sends schema-validated findings to the human review surfaces.
+The CLI for [Postshow](https://postshow.io), the customer recovery agent being built by [eventools](https://eventools.io). It runs the local evidence path, exposes scoped customer incidents over MCP, and sends schema-validated findings to the human review surfaces.
 
 MIT licensed. The CLI, the local runtime, and the MCP server are open source; the hosted cloud runtime is a paid service.
 

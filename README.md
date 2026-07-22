@@ -2,9 +2,9 @@
   <img src="assets/postshow-logo.svg" alt="Postshow" width="246">
 </p>
 
-Postshow is a customer-incident agent for B2B software teams. The current incident spine connects source-grounded product behavior to affected accounts and revenue, keeps proposed interventions beside the evidence, and records the verification plan. Each incident also exposes a deterministic evidence decision—`act`, `gather_more`, or `abstain`—with the evidence gaps that produced it. Automated product-fix preparation and measured post-intervention outcomes are the next part of the loop.
+Postshow is a customer recovery agent for B2B software teams. It is being built to own a customer problem from the first trustworthy signal to proof that the customer recovered.
 
-[Website](https://postshow.io) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
+[Website](https://postshow.io) · [Product direction](docs/PRODUCT.md) · [Roadmap](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
 
 ## The product loop
 
@@ -13,9 +13,11 @@ customer behavior → account and revenue impact → product cause
         → human-reviewed fix and follow-up → measured outcome
 ```
 
-A Postshow customer incident keeps replay evidence, affected accounts, current revenue exposure, a policy-owned evidence ledger, a suspected product cause, proposed actions, and the verification contract together. A model may propose a cause or action; it cannot mark its own evidence complete. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
+A Postshow customer incident keeps replay evidence, affected accounts, current revenue exposure, a policy-owned evidence ledger, a suspected product cause, proposed actions, and the recovery contract together. A model may propose a cause or action; it cannot mark its own evidence complete. Pull requests are one possible intervention, not the product by themselves. Customer messages remain drafts, code changes remain draft pull requests, and both require human approval.
 
-Postshow is in closed beta. Provisioned workspaces can use the open clients and local runtime with their own model key or Ollama; the repository does not yet provide a standalone workspace control plane. Managed cloud availability is gated while the complete incident-to-recovery loop is validated.
+The current foundation persists exact replay evidence, deterministic PostHog-to-Stripe account links, current revenue exposure, proposed actions, a recovery plan, and a reproducible `act`, `gather_more`, or `abstain` decision. Exact GitHub and Sentry references, automated intervention preparation, and measured outcomes are the next delivery slices.
+
+Postshow is in closed beta. Provisioned workspaces can use the open clients and local runtime with their own model key or Ollama; the repository does not include a standalone workspace control plane. Managed cloud access remains gated while the complete recovery loop is tested on real customer incidents.
 
 ## Run the repository
 
@@ -41,14 +43,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for scoped commands, contribution rules, 
 
 ## Repository map
 
-| Path                                               | What lives there                                                                      | Start here when…                              |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------- |
-| [`packages/postshow-core`](packages/postshow-core) | Connector adapters, model execution, prompts, sanitization, schedules, and cost rules | Changing evidence gathering or agent behavior |
-| [`packages/postshow-cli`](packages/postshow-cli)   | CLI, local runtime, workspace setup, exports, and MCP server                          | Improving terminal or coding-agent workflows  |
-| [`apps/postshow`](apps/postshow)                   | Marketing site and authenticated web product                                          | Changing customer-facing web behavior         |
-| [`apps/postshow-desktop`](apps/postshow-desktop)   | Desktop scheduler, credential access, diagnostics, and packaging                      | Changing local background execution           |
+| Path                                               | What lives there                                                                     | Start here when…                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ | -------------------------------------------- |
+| [`packages/postshow-core`](packages/postshow-core) | Incident evidence, identity rules, decision policy, connectors, and model boundaries | Changing the shared product contract         |
+| [`packages/postshow-cli`](packages/postshow-cli)   | CLI, local runtime, workspace setup, exports, and MCP server                         | Improving terminal or coding-agent workflows |
+| [`apps/postshow`](apps/postshow)                   | Marketing site and authenticated web product                                         | Changing customer-facing web behavior        |
+| [`apps/postshow-desktop`](apps/postshow-desktop)   | Desktop scheduler, credential access, diagnostics, and packaging                     | Changing local background execution          |
 
-The architectural flow and cross-package contracts are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Start with [docs/PRODUCT.md](docs/PRODUCT.md) for product decisions, [docs/ROADMAP.md](docs/ROADMAP.md) for the delivery order, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for package boundaries.
 
 ## Product laws
 
@@ -57,10 +59,12 @@ Contributions must preserve these invariants:
 - Connector access is read-only unless a user explicitly approves a supported action.
 - Credentials never enter model prompts.
 - Local-only sources keep credentials and raw records off Postshow cloud.
-- Customer communication never sends automatically.
-- Generated code never merges automatically.
+- Source availability is not incident evidence; a connector record counts only after an exact reference is linked to the incident.
+- Evidence decisions are deterministic, versioned, and independent of model prose.
+- Customer communication stays a draft and never sends automatically.
+- Generated code stays a draft pull request and never merges automatically.
 - Evidence and affected-customer context must stay attached to consequential actions.
-- Source availability is not incident evidence; a connector record only counts after an exact reference is linked to the incident.
+- Negative and inconclusive outcomes remain visible on the incident.
 
 ## Contributing
 
@@ -75,6 +79,6 @@ Use [SUPPORT.md](SUPPORT.md) for hosted-product help and [SECURITY.md](SECURITY.
 
 ## Open-core boundary
 
-The web app, desktop runtime, CLI, MCP server, and shared engine are MIT licensed. The supported always-on control plane, scheduler, billing system, and hosted model gateway are maintained separately. This repository provides inspectable clients and a local runtime; it does not promise a one-command clone of the managed service.
+The incident and evidence contracts, connector engine, web app, desktop runtime, CLI, MCP server, and local runtime are MIT licensed. The supported multi-tenant control plane, always-on scheduler, managed secrets, billing system, and hosted execution are maintained separately. The managed product pins an exact revision of this public core and does not maintain a private alternate evidence policy. This repository does not promise a one-command clone of the managed service.
 
 Each distributable package includes its own `LICENSE`. Maintainers can run `pnpm governance:check` to verify repository, package, workflow, and licensing invariants.

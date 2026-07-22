@@ -17,7 +17,7 @@ describe('LandingPage', () => {
     expect(
       screen.getByRole('heading', {
         level: 1,
-        name: /from customer friction to verified recovery/i,
+        name: /turn customer friction into verified fixes/i,
       })
     ).toBeInTheDocument();
   });

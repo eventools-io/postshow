@@ -1,7 +1,7 @@
 {
   "landing": {
     "title": "Postshow · turn customer friction into verified fixes",
-    "description": "Postshow is building a closed-beta workflow that connects real sessions to account impact, prepares product and customer interventions, and verifies the outcome.",
+    "description": "Postshow finds customer problems worth fixing, connects exact evidence to affected accounts, prepares the response, and returns with a measured result.",
     "path": "/"
   },
   "security": {
@@ -11,7 +11,7 @@
   },
   "openSource": {
     "title": "Open source · Postshow",
-    "description": "Explore and contribute to Postshow’s MIT-licensed evidence engine, web and desktop clients, CLI, MCP server, and target incident-flow preview.",
+    "description": "Read and contribute to Postshow’s public incident and evidence contract, connector engine, clients, CLI, MCP server, and local runtime.",
     "path": "/open-source"
   },
   "terms": {

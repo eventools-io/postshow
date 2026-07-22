@@ -10,33 +10,46 @@ function renderPage(page: React.ReactNode) {
 }
 
 describe('public product claims', () => {
-  it('leads with the current incident spine and labels automation as the target', () => {
+  it('leads with verified recovery and distinguishes the current foundation from the target', () => {
     renderPage(<LandingPage />);
 
     for (const source of ['PostHog', 'Stripe', 'GitHub', 'Sentry']) {
       expect(screen.getAllByText(source).length).toBeGreaterThan(0);
     }
-    expect(document.body).toHaveTextContent(/affected accounts and revenue/i);
-    expect(document.body).toHaveTextContent(/measured outcome checks are next/i);
-    expect(document.body).toHaveTextContent(/the loop we.re building/i);
+    expect(
+      screen.getByRole('heading', { name: /turn customer friction into verified fixes/i })
+    ).toBeInTheDocument();
+    expect(document.body).toHaveTextContent(/exact evidence and affected accounts/i);
+    expect(document.body).toHaveTextContent(
+      /exact code and error references, intervention execution, and measured outcomes are still being built/i
+    );
+    expect(document.body).toHaveTextContent(/the recovery loop/i);
     expect(document.body).toHaveTextContent(/the incident contract/i);
     expect(document.body).toHaveTextContent(
-      /automated fix preparation and measured outcomes are still being built/i
+      /a merged pull request is not a resolved customer problem/i
     );
+    expect(document.body).toHaveTextContent(/no action taken. human review remains required/i);
     expect(
       screen
         .getAllByRole('link', { name: /github/i })
         .some((link) => link.getAttribute('href')?.includes('github.com/eventools-io/postshow'))
     ).toBe(true);
-    expect(document.body).not.toHaveTextContent(/free forever|every session|\bSSO\b/i);
+    expect(document.body).not.toHaveTextContent(
+      /free forever|every session|planned beta pricing|\bSSO\b/i
+    );
   });
 
-  it('makes the repository useful without claiming a turnkey hosted control plane', () => {
+  it('makes the public truth contract and contribution path explicit', () => {
     renderPage(<OpenSourcePage />);
 
-    expect(document.body).toHaveTextContent(/does not promise a one-command clone/i);
+    expect(document.body).toHaveTextContent(/canonical home of the incident, evidence, identity/i);
+    expect(document.body).toHaveTextContent(/cannot keep a private alternate evidence policy/i);
     expect(document.body).toHaveTextContent(/propose a contribution/i);
-    expect(document.body).toHaveTextContent(/one install, scoped commands/i);
+    expect(document.body).toHaveTextContent(/one checkout, scoped commands/i);
+    expect(screen.getByRole('link', { name: /public roadmap/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/docs/ROADMAP.md')
+    );
     expect(screen.getAllByRole('link', { name: /github|repository/i }).length).toBeGreaterThan(0);
     expect(document.body).not.toHaveTextContent(/free forever|any Supabase project|\bSSO\b/i);
   });

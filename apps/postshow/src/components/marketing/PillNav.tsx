@@ -3,8 +3,8 @@ import { Logo } from '@/components/Logo';
 
 const LINKS = [
   { label: 'Product', href: '#demo' },
-  { label: 'How it works', href: '#how' },
-  { label: 'Pricing', href: '#pricing' },
+  { label: 'Recovery loop', href: '#loop' },
+  { label: 'Evidence', href: '#contract' },
   { label: 'FAQ', href: '#faq' },
 ];
 
@@ -53,14 +53,14 @@ export function PillNav() {
           </a>
         </nav>
 
-        <div className="flex items-center gap-1 rounded-pill border border-shell-3 bg-shell-1 p-1 shadow-[0_2px_16px_rgba(20,23,15,0.06)] backdrop-blur">
+        <div className="flex shrink-0 items-center gap-1 rounded-pill border border-shell-3 bg-shell-1 p-1 shadow-[0_2px_16px_rgba(20,23,15,0.06)] backdrop-blur">
           <Link
             to="/signin"
-            className="rounded-pill px-3 py-[6px] font-public-sans text-[13px] font-medium text-shell-fg-2 hover:bg-shell-2 hover:text-shell-fg"
+            className="hidden rounded-pill px-3 py-[6px] font-public-sans text-[13px] font-medium text-shell-fg-2 hover:bg-shell-2 hover:text-shell-fg sm:inline-flex"
           >
             Sign in
           </Link>
-          <a href="#waitlist" className="mk-btn-dark !h-8 !px-4 text-[13px]">
+          <a href="#waitlist" className="mk-btn-dark !h-8 !px-3 text-[13px] sm:!px-4">
             Closed beta
           </a>
         </div>

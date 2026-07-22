@@ -3,9 +3,9 @@
 The `@eventools/postshow` package contains two browser surfaces:
 
 - the public marketing, open-source, security, sign-in, and legal pages;
-- the current authenticated workspace for Inbox actions, accounts, field notes, connections, work plans, and settings, plus the synthetic preview of the target customer-incident flow.
+- the authenticated customer-incident workspace, supporting review surfaces, and a synthetic preview of the complete recovery loop.
 
-Start with the repository-level [architecture guide](../../docs/ARCHITECTURE.md) and [contribution guide](../../CONTRIBUTING.md).
+Start with the repository-level [product direction](../../docs/PRODUCT.md), [public roadmap](../../docs/ROADMAP.md), [architecture guide](../../docs/ARCHITECTURE.md), and [contribution guide](../../CONTRIBUTING.md).
 
 ## Develop
 
@@ -33,7 +33,7 @@ The development server runs at `http://localhost:5173` by default.
 
 ## Public claims
 
-Marketing copy must match current behavior and security boundaries. Update `MarketingTruth.test.tsx` when a public claim changes, but do not weaken an assertion merely to make new copy pass.
+Marketing leads with verified customer recovery. Evidence decisions explain why that promise is trustworthy; they are not the customer-facing category. Copy must distinguish the current incident foundation from planned exact code and error evidence, intervention execution, and measured outcomes. Update `MarketingTruth.test.tsx` when a public claim changes, but do not weaken an assertion merely to make new copy pass.
 
 The closed-beta form is named `beta-signup`. Netlify detects its static skeleton in `public/__forms.html`; the React form submits to the matching endpoint without navigating away.
 
