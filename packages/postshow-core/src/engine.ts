@@ -49,7 +49,8 @@ export class ModelRequestError extends Error {
     this.status = status;
     this.attempts = attempts;
     this.billingAmbiguous =
-      billingAmbiguous ?? (attempts > 0 && (status === null || status >= 500 || status === 200));
+      billingAmbiguous ??
+      (!usage?.usageValid && attempts > 0 && (status === null || status >= 500 || status === 200));
     this.inputTokens = usage?.inputTokens ?? null;
     this.outputTokens = usage?.outputTokens ?? null;
     this.usageValid = usage?.usageValid ?? null;
@@ -380,18 +381,37 @@ async function callAnthropic(
   );
   const usage = modelUsage(jsonRecord(data.usage), 'input_tokens', 'output_tokens');
   if (data.stop_reason === 'refusal') {
-    throw new ModelRequestError('model refused the request', 200, attempts, usage);
+    throw new ModelRequestError(
+      'model refused the request',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
   }
   if (data.stop_reason === 'max_tokens') {
-    throw new ModelRequestError('model output was truncated', 200, attempts, usage);
+    throw new ModelRequestError(
+      'model output was truncated',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
   }
   const text = (Array.isArray(data.content) ? data.content : [])
     .map(jsonRecord)
     .filter((block) => block.type === 'text')
     .map((block) => (typeof block.text === 'string' ? block.text : ''))
     .join('');
-  if (!text.trim())
-    throw new ModelRequestError('model returned no text output', 200, attempts, usage);
+  if (!text.trim()) {
+    throw new ModelRequestError(
+      'model returned no text output',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
+  }
   return {
     text,
     ...usage,
@@ -486,7 +506,8 @@ async function callOpenAiCompatible(
       error instanceof Error ? error.message : 'model response was unusable',
       200,
       attempts,
-      usage
+      usage,
+      billingAmbiguous
     );
   }
   return {

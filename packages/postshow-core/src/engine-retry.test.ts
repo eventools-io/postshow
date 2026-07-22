@@ -41,7 +41,11 @@ describe('model retry policy', () => {
           prompt: 'summarize',
           retryTransientErrors: true,
         })
-      ).resolves.toMatchObject({ inputTokens: 10, outputTokens: 2 });
+      ).resolves.toMatchObject({
+        inputTokens: 10,
+        outputTokens: 2,
+        billingAmbiguous: status >= 500,
+      });
       expect(request).toHaveBeenCalledTimes(2);
     }
   );
@@ -79,13 +83,15 @@ describe('model retry policy', () => {
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response('', { status: 400 }));
 
-    await expect(
-      callModel(engine, 'sk-test', {
-        system: 'return JSON',
-        prompt: 'summarize',
-        retryTransientErrors: true,
-      })
-    ).rejects.toThrow('model call failed (400)');
+    const error = await callModel(engine, 'sk-test', {
+      system: 'return JSON',
+      prompt: 'summarize',
+      retryTransientErrors: true,
+    }).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({
+      message: 'model call failed (400)',
+      billingAmbiguous: false,
+    });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
@@ -170,7 +176,7 @@ describe('model retry policy', () => {
     ).resolves.toMatchObject({ inputTokens: 0, outputTokens: 0, usageValid: false });
   });
 
-  it('returns typed attempt and usage metadata for billable response failures', async () => {
+  it('returns exact usage without marking a single accepted response ambiguous', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -190,7 +196,7 @@ describe('model retry policy', () => {
     expect(error).toMatchObject({
       status: 200,
       attempts: 1,
-      billingAmbiguous: true,
+      billingAmbiguous: false,
       inputTokens: 10,
       outputTokens: 200,
       usageValid: true,
