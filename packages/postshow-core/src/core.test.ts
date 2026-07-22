@@ -494,18 +494,49 @@ describe('plans', () => {
   });
 
   it('prices hosted tiers above modeled cost with margin', () => {
+    const profiles = [
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.sessionsWatched / 40,
+        inputTokens: 12_000,
+        outputTokens: 3_000,
+        allowedTiers: new Set(['fast']),
+      },
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.investigations,
+        inputTokens: 12_000,
+        outputTokens: 3_000,
+        allowedTiers: new Set(['fast', 'standard']),
+      },
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.deepDives,
+        inputTokens: 25_000,
+        outputTokens: 8_000,
+        allowedTiers: new Set(['fast', 'standard', 'frontier']),
+      },
+    ];
     const profileCost = (plan: (typeof PLANS)['solo']) => {
-      const narrationCalls = plan.quota.sessionsWatched / 40;
-      const narration =
-        narrationCalls *
-        (estimateCostUsdMicros('anthropic', 'claude-haiku-4-5', 12_000, 3_000) / 1e6);
-      const deepDives =
-        plan.quota.deepDives *
-        (estimateCostUsdMicros('anthropic', 'claude-opus-4-8', 25_000, 8_000) / 1e6);
-      const investigations =
-        plan.quota.investigations *
-        (estimateCostUsdMicros('anthropic', 'claude-sonnet-5', 12_000, 3_000) / 1e6);
-      return (narration + deepDives + investigations) * 1.05;
+      const worstCase = profiles.reduce((total, profile) => {
+        const selectableCosts = CATALOG.flatMap((provider) =>
+          provider.hosted
+            ? provider.models
+                .filter(
+                  (model) => model.hostedEligible === true && profile.allowedTiers.has(model.tier)
+                )
+                .map(
+                  (model) =>
+                    estimateCostUsdMicros(
+                      provider.id,
+                      model.id,
+                      profile.inputTokens,
+                      profile.outputTokens
+                    ) / 1e6
+                )
+            : []
+        );
+        expect(selectableCosts.length).toBeGreaterThan(0);
+        return total + profile.calls(plan) * Math.max(...selectableCosts);
+      }, 0);
+      return worstCase * 1.05;
     };
     expect(PLANS.solo.priceUsdMonthly! / profileCost(PLANS.solo)).toBeGreaterThan(3);
     expect(PLANS.team.priceUsdMonthly! / profileCost(PLANS.team)).toBeGreaterThan(3);
