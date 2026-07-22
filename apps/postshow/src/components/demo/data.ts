@@ -62,11 +62,11 @@ export const DEMO_ITEMS: DemoItem[] = [
   },
   {
     id: 'sourcewizard',
-    meta: 'Friction · Onboarding',
-    title: 'Seven trials stalled connecting their first data source. Ticket drafted with repro.',
-    evidence: '7 sessions watched · SourceWizard.tsx',
-    action: 'Open ticket',
-    doneLabel: 'Ticket filed',
+    meta: 'Customer incident · Onboarding',
+    title: 'Seven trials stalled at the same step. Product ticket and account follow-ups drafted.',
+    evidence: '7 replay sessions · 3 affected accounts · SourceWizard.tsx',
+    action: 'Review incident',
+    doneLabel: 'Interventions approved',
     state: 'pending',
   },
   {
@@ -187,7 +187,7 @@ export const DEMO_NIGHT_LOG: DemoLogLine[] = [
   {
     at: '02:04',
     engine: 'watcher · haiku 4.5 · low',
-    text: 'narrated 312 sessions for under a cent. 47 hit the dead drag zone.',
+    text: 'triaged 312 sessions and narrated the 40 highest-signal paths. a dead drag target repeated.',
     tone: 'normal',
   },
   {
@@ -204,7 +204,7 @@ export const DEMO_NIGHT_LOG: DemoLogLine[] = [
   {
     at: '02:31',
     engine: 'deep dive · opus 4.8 · high',
-    text: 'why: thursday\u2019s redesign hid monthly pricing. affected paths, accounts, and the PR are in the finding.',
+    text: 'why: thursday\u2019s redesign hid monthly pricing. affected paths, accounts, and the suspected change are attached.',
     tone: 'normal',
   },
   {
@@ -227,6 +227,6 @@ export const DEMO_NIGHT_LOG: DemoLogLine[] = [
 export const DEMO_CONNECTIONS: DemoConnection[] = [
   { id: 'posthog', name: 'PostHog', detail: 'events + replays', connected: true },
   { id: 'stripe', name: 'Stripe', detail: 'revenue', connected: true },
-  { id: 'postgres', name: 'Postgres', detail: 'product db', connected: true },
-  { id: 'github', name: 'GitHub', detail: 'repro suspects', connected: false },
+  { id: 'github', name: 'GitHub', detail: 'code context', connected: true },
+  { id: 'sentry', name: 'Sentry', detail: 'errors + traces', connected: false },
 ];

@@ -1,48 +1,106 @@
 # Contributing to Postshow
 
-Thanks for wanting to make Postshow better. Issues, bug reports, and pull
-requests are welcome here when they contain no credentials, customer data, or
-private service context. Use [SUPPORT.md](SUPPORT.md) for private product help and
-[SECURITY.md](SECURITY.md) for vulnerability reports.
+Postshow welcomes public bug reports, documentation improvements, tests, connector work, and product changes to the open clients and engine.
 
-## How contributions work
+Do not include credentials, customer data, private logs, or confidential hosted-service context in an issue, fixture, commit, or pull request. Use [SUPPORT.md](SUPPORT.md) for private product help and [SECURITY.md](SECURITY.md) for vulnerabilities.
 
-This is the real development repository. Open your PR here; CI runs here,
-review happens here, and approved PRs merge here, with your commits and
-authorship in the history like any other project.
+## Before you start
 
-The hosted cloud runtime lives in a separate private repository that vendors
-this repo's engine core at a pinned ref, so a change to
-packages/postshow-core ships to the hosted product when we bump that pin.
-Nothing about your contribution flow depends on it.
+- Search [open issues](https://github.com/eventools-io/postshow/issues) and pull requests.
+- Comment on an issue before taking a large or user-visible change.
+- If the issue queue is empty, open a focused contribution proposal and wait for maintainer confirmation before doing substantial work.
+- Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before changing a shared contract.
 
-## Ground rules
+A useful proposal explains the user problem, the intended outcome, and the privacy or approval boundaries. It does not need a complete technical design.
 
-- By submitting a contribution you agree it is licensed under the MIT
-  license of this repository.
-- Conventional PR titles (type(scope): lowercase subject); CI enforces this.
-- No em dashes in prose or comments; the unslop gate checks a set of
-  writing and code tells on added lines.
-- The agent's guardrails are product law: nothing sends without a human
-  approve, connector reads stay read-only, credentials never pass through a
-  model, and local-only stays local. PRs that weaken these will be declined
-  regardless of code quality.
+## Set up the repository
 
-## Getting started
+Prerequisites:
+
+- Node.js 24
+- pnpm 10.20.0, enabled through Corepack or installed directly
+- Git
 
 ```sh
+git clone https://github.com/eventools-io/postshow.git
+cd postshow
 pnpm install
-pnpm test          # unit tests across every package
-pnpm type-check
-pnpm build         # web app (with prerendered heads), cli, desktop shell
-pnpm governance:check
+pnpm test
 ```
 
-Good first areas: connector adapters (packages/postshow-core/src/adapters.ts),
-the CLI wizard's stack detection (packages/postshow-cli/src/detect.ts), and
-provider support in the engine catalog.
+No hosted Postshow credentials are required for the unit-test suite. Tests must use synthetic fixtures or fully scrubbed recordings from a maintainer-owned test account, never customer or production captures.
 
-Participation in this repository follows
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The pull-request template asks for exact
-verification and explicit security, privacy, tenancy, licensing, and release-impact
-notes; complete it rather than deleting the checklist.
+## Work on one surface
+
+| Area          | Development command                                 | Test command                                     |
+| ------------- | --------------------------------------------------- | ------------------------------------------------ |
+| Shared engine | `pnpm --filter @eventools/postshow-core type-check` | `pnpm --filter @eventools/postshow-core test`    |
+| CLI and MCP   | `pnpm --filter postshow build`                      | `pnpm --filter postshow test`                    |
+| Web app       | `pnpm --filter @eventools/postshow dev`             | `pnpm --filter @eventools/postshow test`         |
+| Desktop app   | `pnpm --filter @eventools/postshow-desktop build`   | `pnpm --filter @eventools/postshow-desktop test` |
+
+Keep changes scoped. A connector change should not quietly restyle the web app; a documentation fix should not carry generated build output.
+
+## Product and security rules
+
+These are product contracts, not preferences:
+
+- Connector reads remain least-scope and read-only by default.
+- Credentials never enter prompts, logs, fixtures, or browser storage.
+- Local-only sources keep credentials and raw records off Postshow cloud.
+- Customer messages never send without a human action.
+- Generated code never merges automatically.
+- One connector failure must not fabricate evidence or erase healthy evidence from other sources.
+- Unknown model prices and malformed usage data must fail accounting visibly.
+
+Changes that touch authentication, credentials, tenancy, model routing, exports, connector data, or outbound actions need focused tests and an explicit security note in the pull request.
+
+## Tests and fixtures
+
+- Add a regression test for a bug fix.
+- Use synthetic fixtures whenever possible. A recorded response is allowed only from a maintainer-owned test account after fully removing names, emails, identifiers, URLs, tokens, and provider payload fragments. Never record customer or production traffic.
+- Connector tests should cover success, malformed provider data, timeout, rate limit, partial failure, and redaction where relevant.
+- Test behavior through public package interfaces when possible.
+- Do not update snapshots or expected output without explaining the behavioral change.
+
+Run the full gate before requesting review:
+
+```sh
+pnpm test
+pnpm type-check
+pnpm lint
+pnpm build
+pnpm format:check
+pnpm governance:check
+git diff --check
+```
+
+CI also runs a pinned actionlint and ShellCheck pass over workflows, `pnpm audit --audit-level low`, a diff-aware prose and code quality check, and the conventional-title rule below. Those checks download their own pinned tools on GitHub-hosted runners; review their failure output if you do not reproduce them locally.
+
+## Open a pull request
+
+Use a conventional title with a lowercase subject, for example:
+
+```text
+fix(core): preserve partial connector evidence
+docs: clarify local model setup
+test(cli): cover expired workspace token
+```
+
+In the pull request:
+
+1. Explain the user-visible problem and the chosen behavior.
+2. Link the issue when one exists.
+3. List the exact verification commands you ran.
+4. Call out security, privacy, tenancy, migration, compatibility, licensing, and release impact.
+5. Include screenshots for visible web or desktop changes.
+
+Maintainers may ask to split a change when independent concerns need different review or release paths.
+
+## How changes ship
+
+This is the development repository for the open components. CI and review happen here, and accepted contributions merge with their original authorship.
+
+The managed cloud runtime lives separately and pins an exact revision of `packages/postshow-core`. A core contribution reaches hosted Postshow when maintainers update and verify that pin. Contributors do not need access to the private runtime.
+
+By submitting a contribution, you agree that it is licensed under this repository's MIT license. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).

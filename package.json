@@ -2,7 +2,7 @@
   "name": "postshow-oss",
   "private": true,
   "version": "0.0.0",
-  "description": "Postshow (postshow.io): the customer-intelligence teammate, by eventools. Open-core monorepo: web app, desktop agent, CLI, MCP server, and engine.",
+  "description": "Open-core clients and evidence engine for Postshow, a closed-beta product being built around verified customer recovery.",
   "author": "Eventools LLC",
   "license": "MIT",
   "homepage": "https://postshow.io",

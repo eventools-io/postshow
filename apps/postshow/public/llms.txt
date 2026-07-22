@@ -1,15 +1,15 @@
 # Postshow
 
-> Postshow is an AI customer-intelligence teammate for B2B SaaS, by Eventools LLC (https://eventools.io). It samples product sessions and connected business signals, investigates why users convert, stall, or churn, and hands the team a queue of drafted actions: outreach, friction tickets with repros, churn-save plays, and expansion flags. Supported outbound actions require an authenticated human review before execution.
+> Postshow is a closed-beta product by Eventools LLC (https://eventools.io). It is being built to connect product behavior to affected accounts and revenue, prepare product and customer interventions for human review, and check whether the outcome improved.
 
 Key facts:
 
 - Open core: the web app, CLI (npm package `postshow`), MCP server, desktop menu-bar agent, and the whole engine are MIT licensed. The always-on hosted cloud runtime and billing are the paid product.
-- Pricing: The current Free plan uses your own model API keys or local models via Ollama. Hosted Solo is $99/month (3,000 sessions watched, 20 deep dives). Hosted Team is $249/month (12,000 sessions watched, 60 deep dives). These self-service plans are priced in sessions watched and deep dives rather than tokens; plan terms and current checkout control.
+- Pricing: Planned beta pricing is $0 with your own model API keys or local models via Ollama, $99/month for hosted Solo, and $249/month for hosted Team. Access is gated and there is no public checkout yet; final invitations and order terms control availability and limits.
 - Models: user-selectable per task class (session watching, recon, deep dives, drafting) with per-task effort levels. Supported providers: Anthropic, OpenAI, Moonshot (Kimi), Z.ai (GLM), DeepSeek, xAI (Grok), Mistral, any OpenAI-compatible endpoint, and local models through Ollama.
-- Connectors: PostHog (events and session data), Stripe, Postgres, GitHub, Linear, Sentry, Slack, and Resend. Gathering uses least-scope access where the provider supports it; destination connectors perform only explicitly authorized outbound actions.
-- Local-only: supported source credentials and raw source records stay off Postshow cloud. Postgres is always device-only and uses one owner-configured, bounded read-only SELECT; remote databases must require TLS. Its source rows may enter the evidence packet sent to the selected local or BYOK model on that device, while only sanitized derived findings sync to Postshow. Ollama keeps model processing on-device; a remote BYOK model receives the evidence packet directly from the device.
-- Setup: `npx postshow init` detects supported tools, guides configuration, tests supported credential paths where available, and never places a secret in a model prompt.
+- Product focus: PostHog supplies behavior evidence, Stripe supplies account and revenue context, GitHub supplies code context, and Sentry can add error evidence. Other connectors are listed only when they have a tested gather or explicitly authorized destination path.
+- Local-only: supported source credentials and raw source records stay off Postshow cloud. Postgres is always device-only and uses one owner-configured, bounded read-only SELECT; remote databases must require TLS. Its source rows may enter the evidence packet sent to the selected local or BYOK model on that device. Only schema-validated derived findings sync to Postshow, but those findings can still contain customer context. Ollama keeps model processing on-device; a remote BYOK model receives the evidence packet directly from the device.
+- Setup: No supported npm release has shipped yet. Clone the GitHub repository, run `pnpm install` and `pnpm --filter postshow build`, then start setup with `node packages/postshow-cli/dist/index.js init`. Setup requires a provisioned workspace token and never places a secret in a model prompt.
 - The agent plans its own work (nightly session sweeps, weekly deep dives, standing investigations) on a schedule the human can edit or veto.
 
 ## Pages

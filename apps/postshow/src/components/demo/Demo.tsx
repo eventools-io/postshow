@@ -31,6 +31,7 @@ const SEVERITY = { high: 'text-bad', medium: 'text-warn', low: 'text-night-fg-3'
 export function Demo() {
   const [tab, setTab] = useState<DemoTab>('Inbox');
   const [items, setItems] = useState<DemoItem[]>(DEMO_ITEMS);
+  const [openIncident, setOpenIncident] = useState(false);
   const [openAccount, setOpenAccount] = useState<string | null>('lattice');
   const [jobs, setJobs] = useState<DemoJob[]>(DEMO_JOBS);
   const [proposal, setProposal] = useState<'open' | 'approved' | 'vetoed'>('open');
@@ -105,7 +106,98 @@ export function Demo() {
                 ? `${pending} draft${pending === 1 ? '' : 's'} from last night`
                 : 'All clear.'}
             </p>
-            {pending === 0 ? (
+            {openIncident ? (
+              <div className="px-5 py-5">
+                <button
+                  type="button"
+                  onClick={() => setOpenIncident(false)}
+                  className="rounded-sm font-public-mono text-[11px] uppercase tracking-[0.14em] text-signal hover:text-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                >
+                  ← Back to inbox
+                </button>
+                <div className="mt-5 grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
+                  <div>
+                    <p className="m-0 font-public-mono text-[10px] font-medium uppercase tracking-[0.14em] text-signal">
+                      Customer incident · Onboarding
+                    </p>
+                    <h3 className="m-0 mt-2 max-w-[28ch] font-public-sans text-[21px] font-semibold leading-[1.25] text-night-fg">
+                      Seven trials stalled while connecting their first data source.
+                    </h3>
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-lg border border-night-3 bg-night-1 p-4">
+                        <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.14em] text-night-fg-3">
+                          Evidence
+                        </p>
+                        <p className="m-0 mt-2 font-public-sans text-[13px] leading-[1.5] text-night-fg-2">
+                          Seven replay sessions repeat the same failed connection step.
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-night-3 bg-night-1 p-4">
+                        <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.14em] text-night-fg-3">
+                          Account impact
+                        </p>
+                        <p className="m-0 mt-2 font-public-sans text-[13px] leading-[1.5] text-night-fg-2">
+                          Three trial accounts have not completed activation. No revenue impact is
+                          claimed yet.
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-night-3 bg-night-1 p-4">
+                        <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.14em] text-night-fg-3">
+                          Suspected cause
+                        </p>
+                        <p className="m-0 mt-2 font-public-sans text-[13px] leading-[1.5] text-night-fg-2">
+                          The evidence points to the validation path in{' '}
+                          <code className="font-public-mono text-[11px] text-night-fg">
+                            SourceWizard.tsx
+                          </code>
+                          . Engineering still needs to confirm it.
+                        </p>
+                      </div>
+                      <div className="rounded-lg border border-night-3 bg-night-1 p-4">
+                        <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.14em] text-night-fg-3">
+                          Verification plan
+                        </p>
+                        <p className="m-0 mt-2 font-public-sans text-[13px] leading-[1.5] text-night-fg-2">
+                          Recheck first-source completion seven days after the change. Outcome is
+                          pending.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <aside className="rounded-lg border border-night-3 bg-night-1 p-4">
+                    <p className="m-0 font-public-mono text-[10px] uppercase tracking-[0.14em] text-signal">
+                      Pending human review
+                    </p>
+                    <div className="mt-4 border-t border-night-3 pt-4">
+                      <p className="m-0 font-public-sans text-[13px] font-medium text-night-fg">
+                        Product intervention
+                      </p>
+                      <p className="m-0 mt-1 font-public-sans text-[12px] leading-[1.5] text-night-fg-2">
+                        Draft a ticket with the replay evidence and suspected validation path.
+                      </p>
+                    </div>
+                    <div className="mt-4 border-t border-night-3 pt-4">
+                      <p className="m-0 font-public-sans text-[13px] font-medium text-night-fg">
+                        Account recovery
+                      </p>
+                      <p className="m-0 mt-1 font-public-sans text-[12px] leading-[1.5] text-night-fg-2">
+                        Draft a concise follow-up for the three affected trial owners.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItem('sourcewizard', 'done');
+                        setOpenIncident(false);
+                      }}
+                      className="mt-5 inline-flex h-9 w-full items-center justify-center rounded-pill bg-signal px-4 font-public-sans text-[12px] font-medium text-signal-ink hover:bg-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                    >
+                      Approve both drafts
+                    </button>
+                  </aside>
+                </div>
+              </div>
+            ) : pending === 0 ? (
               <div className="flex flex-col items-start gap-4 px-5 py-10">
                 <p className="m-0 font-public-sans text-[16px] font-medium text-night-fg">
                   Inbox zero. Enjoy the coffee.
@@ -119,11 +211,14 @@ export function Demo() {
                     href="#waitlist"
                     className="inline-flex h-10 items-center rounded-pill bg-signal px-5 font-public-sans text-[13px] font-medium text-signal-ink hover:bg-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
                   >
-                    Get yours when the beta opens →
+                    Apply for the closed beta →
                   </a>
                   <button
                     type="button"
-                    onClick={() => setItems(DEMO_ITEMS)}
+                    onClick={() => {
+                      setItems(DEMO_ITEMS);
+                      setOpenIncident(false);
+                    }}
                     className="rounded-sm font-public-mono text-[12px] uppercase tracking-[0.14em] text-signal hover:text-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
                   >
                     replay last night →
@@ -158,7 +253,13 @@ export function Demo() {
                       <div className="flex shrink-0 gap-2">
                         <button
                           type="button"
-                          onClick={() => setItem(item.id, 'done')}
+                          onClick={() => {
+                            if (item.id === 'sourcewizard') {
+                              setOpenIncident(true);
+                            } else {
+                              setItem(item.id, 'done');
+                            }
+                          }}
                           aria-label={`${item.action}: ${item.meta}`}
                           className="inline-flex h-8 items-center rounded-pill bg-signal px-4 font-public-sans text-[12px] font-medium text-signal-ink hover:bg-signal-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
                         >
@@ -488,8 +589,8 @@ export function Demo() {
       </div>
 
       <p className="m-0 flex flex-wrap gap-x-4 border-t border-night-3 bg-night-2 px-5 py-2 font-public-mono text-[10px] uppercase tracking-[0.12em] text-night-fg-3">
-        <span>312 sessions watched</span>
-        <span>1 why found</span>
+        <span>312 sessions triaged · 40 narrated</span>
+        <span>1 incident built</span>
         <span>engine · {engine === 'local' ? 'local' : 'your key'}</span>
         {done > 0 && <span className="text-signal">{done} approved</span>}
         {skipped > 0 && <span>{skipped} skipped</span>}

@@ -3,36 +3,29 @@ import { Logo } from '@/components/Logo';
 import { LegalLinks } from '@/components/LegalLinks';
 import { PAGE_META, usePageMeta } from '@/lib/seo';
 
-const OPEN = [
-  {
-    name: 'The web app',
-    detail: 'Marketing site and the full workspace UI: inbox, dossiers, field notes, work plan.',
-  },
-  {
-    name: 'The CLI',
-    detail:
-      'npm package `postshow`. The setup wizard, the local agent runtime, inbox review, and the doctor.',
-  },
-  {
-    name: 'The MCP server',
-    detail:
-      'postshow mcp over stdio. Your coding agent reads dossiers and field notes with scoped workspace access.',
-  },
-  {
-    name: 'The desktop agent',
-    detail: 'The Electron menu-bar shell: background scheduler, catch-up on wake, local runtime.',
-  },
-  {
-    name: 'The engine',
-    detail:
-      'The whole brain: model catalog for seven providers plus Ollama, per-task model and effort resolution, the agent prompts, connector adapters, sanitizers, scheduling.',
-  },
-];
+const REPOSITORY_URL = 'https://github.com/eventools-io/postshow';
 
-const PAID = [
-  'The always-on cloud runtime that runs your schedule with your laptop closed',
-  'Hosted models on our bill, priced in sessions watched and deep dives',
-  'Billing, quotas, and the managed gateway',
+const COMPONENTS = [
+  {
+    path: 'packages/postshow-core',
+    name: 'Evidence and model engine',
+    detail: 'Connector adapters, task prompts, sanitization, scheduling, retries, and cost rules.',
+  },
+  {
+    path: 'packages/postshow-cli',
+    name: 'CLI and MCP server',
+    detail: 'Workspace setup, local execution, inbox review, exports, and scoped agent access.',
+  },
+  {
+    path: 'apps/postshow',
+    name: 'Web product',
+    detail: 'The public site, current workspace UI, and target incident-review preview.',
+  },
+  {
+    path: 'apps/postshow-desktop',
+    name: 'Desktop runtime',
+    detail: 'The local scheduler, secure credential access, diagnostics, and release packaging.',
+  },
 ];
 
 export function OpenSourcePage() {
@@ -40,7 +33,7 @@ export function OpenSourcePage() {
   return (
     <div className="min-h-screen bg-shell-0 text-shell-fg">
       <header className="border-b border-shell-3">
-        <div className="mx-auto flex h-16 w-full max-w-[860px] items-center justify-between px-5">
+        <div className="mx-auto flex h-16 w-full max-w-[920px] items-center justify-between px-5">
           <Link
             to="/"
             className="flex items-center gap-[10px] font-public-sans text-[17px] font-semibold tracking-[-0.02em] text-shell-fg"
@@ -48,115 +41,166 @@ export function OpenSourcePage() {
             <Logo size={22} />
             Postshow
           </Link>
-          <Link to="/" className="font-public-sans text-[13px] text-shell-fg-2 hover:text-shell-fg">
-            ← Back
-          </Link>
+          <div className="flex items-center gap-4">
+            <a
+              href={REPOSITORY_URL}
+              className="font-public-sans text-[13px] font-medium text-shell-fg hover:text-signal-deep"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub ↗
+            </a>
+            <Link
+              to="/"
+              className="font-public-sans text-[13px] text-shell-fg-2 hover:text-shell-fg"
+            >
+              ← Back
+            </Link>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-[860px] px-5 pb-24 pt-14">
+      <main className="mx-auto max-w-[920px] px-5 pb-24 pt-14">
         <p className="mk-eyebrow m-0 text-signal-deep">open source</p>
-        <h1 className="m-0 mt-3 max-w-[20ch] font-public-sans text-[clamp(32px,5vw,56px)] font-semibold leading-[1.05] tracking-[-0.03em]">
-          MIT where you run it.
-          <em className="block font-normal italic text-shell-fg-3">Paid where we run it.</em>
+        <h1 className="m-0 mt-3 max-w-[18ch] font-public-sans text-[clamp(36px,6vw,64px)] font-semibold leading-[1.03] tracking-[-0.035em]">
+          Read the engine.
+          <em className="block font-normal italic text-shell-fg-3">Help improve the loop.</em>
         </h1>
-        <p className="m-0 mt-6 max-w-[64ch] font-public-sans text-[16px] leading-[1.6] text-shell-fg-2">
-          Postshow is open core: the product is open source, and the always-on cloud is the
-          business. An agent that reads your sessions, your revenue, and your errors should be code
-          you can read back.
+        <p className="m-0 mt-6 max-w-[66ch] font-public-sans text-[16px] leading-[1.65] text-shell-fg-2">
+          Postshow is being built to connect product evidence to affected customers, proposed
+          interventions, and a measured outcome. Today this repository contains the evidence engine,
+          draft-review clients, and a synthetic preview of the target incident flow. The web app,
+          desktop runtime, CLI, MCP server, and shared engine are MIT licensed.
         </p>
+        <div className="mt-8 flex flex-wrap gap-3">
+          <a href={REPOSITORY_URL} className="mk-btn-dark" target="_blank" rel="noreferrer">
+            View the repository ↗
+          </a>
+          <a
+            href={`${REPOSITORY_URL}/blob/main/CONTRIBUTING.md`}
+            className="mk-btn-light"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Contribution guide
+          </a>
+        </div>
 
-        <section className="mt-12">
-          <h2 className="m-0 font-public-sans text-[22px] font-semibold tracking-[-0.02em]">
-            MIT licensed
-          </h2>
-          <div className="mt-4 flex flex-col gap-3">
-            {OPEN.map((item) => (
-              <div key={item.name} className="rounded-lg border border-shell-3 bg-shell-1 p-5">
-                <h3 className="m-0 font-public-sans text-[15px] font-semibold">{item.name}</h3>
-                <p className="m-0 mt-1 font-public-sans text-[14px] leading-[1.55] text-shell-fg-2">
-                  {item.detail}
-                </p>
-              </div>
-            ))}
+        <section className="mt-16 border-t border-shell-3 pt-8">
+          <div className="grid gap-4 md:grid-cols-[220px_1fr] md:gap-10">
+            <div>
+              <p className="mk-eyebrow m-0 text-shell-fg-3">repository map</p>
+              <h2 className="m-0 mt-2 font-public-sans text-[24px] font-semibold tracking-[-0.02em]">
+                Four places to work
+              </h2>
+            </div>
+            <div className="flex flex-col border-t border-shell-3">
+              {COMPONENTS.map((component) => (
+                <a
+                  key={component.path}
+                  href={`${REPOSITORY_URL}/tree/main/${component.path}`}
+                  className="grid gap-2 border-b border-shell-3 py-5 text-shell-fg no-underline hover:bg-shell-1 sm:grid-cols-[190px_1fr] sm:px-3"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <code className="font-public-mono text-[11px] text-signal-deep">
+                    {component.path}
+                  </code>
+                  <span>
+                    <strong className="block font-public-sans text-[15px] font-semibold">
+                      {component.name}
+                    </strong>
+                    <span className="mt-1 block font-public-sans text-[13px] leading-[1.5] text-shell-fg-2">
+                      {component.detail}
+                    </span>
+                  </span>
+                </a>
+              ))}
+            </div>
           </div>
         </section>
 
-        <section className="mt-12">
-          <h2 className="m-0 font-public-sans text-[22px] font-semibold tracking-[-0.02em]">
-            The paid part
-          </h2>
-          <ul className="m-0 mt-4 flex list-none flex-col gap-2 p-0">
-            {PAID.map((item) => (
-              <li
-                key={item}
-                className="flex gap-2 font-public-sans text-[14px] leading-[1.55] text-shell-fg-2"
+        <section className="mt-16 grid gap-8 rounded-xl bg-night-0 px-6 py-8 text-night-fg md:grid-cols-[1fr_1.25fr] md:px-9 md:py-10">
+          <div>
+            <p className="mk-eyebrow m-0 text-signal">local development</p>
+            <h2 className="m-0 mt-3 font-public-sans text-[26px] font-semibold tracking-[-0.02em]">
+              One install, scoped commands
+            </h2>
+            <p className="m-0 mt-3 font-public-sans text-[14px] leading-[1.6] text-night-fg-2">
+              Use Node 24 and pnpm 10. Start with the package you want to change, then run the full
+              repository checks before opening a pull request.
+            </p>
+          </div>
+          <pre className="m-0 overflow-x-auto rounded-lg border border-night-3 bg-night-1 p-5 font-public-mono text-[12px] leading-[1.9] text-night-fg">
+            <code>{`pnpm install
+pnpm --filter @eventools/postshow dev
+pnpm --filter @eventools/postshow test
+
+# before a pull request
+pnpm test
+pnpm type-check
+pnpm lint
+pnpm build
+pnpm format:check
+git diff --check`}</code>
+          </pre>
+        </section>
+
+        <section className="mt-16 grid gap-8 border-t border-shell-3 pt-8 md:grid-cols-2">
+          <div>
+            <p className="mk-eyebrow m-0 text-signal-deep">first contribution</p>
+            <h2 className="m-0 mt-2 font-public-sans text-[24px] font-semibold tracking-[-0.02em]">
+              Start with a bounded problem
+            </h2>
+            <p className="m-0 mt-3 font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
+              Look for a scoped issue, reproduce it, and comment before taking on a large change.
+              Connector work must use synthetic fixtures or fully scrubbed recordings from a
+              maintainer-owned test account; never capture production or customer responses. Source
+              access stays read-only and product actions remain human approved.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <a
+                href={`${REPOSITORY_URL}/issues/new?template=feature_request.yml`}
+                className="mk-btn-dark"
+                target="_blank"
+                rel="noreferrer"
               >
-                <span
-                  className="mt-[8px] inline-block h-[5px] w-[5px] shrink-0 rounded-pill bg-signal-deep"
-                  aria-hidden
-                />
-                {item}
-              </li>
-            ))}
-          </ul>
-          <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            The current Free plan puts model usage on your provider account or local hardware. The
-            hosted tiers add the managed runtime and hosted model usage under the plan terms shown
-            at checkout. The MIT-licensed clients and engine remain available if a managed plan
-            stops fitting your needs.
-          </p>
-        </section>
-
-        <section className="mt-12">
-          <h2 className="m-0 font-public-sans text-[22px] font-semibold tracking-[-0.02em]">
-            Try the open parts now
-          </h2>
-          <div className="mt-4 rounded-lg bg-night-0 p-5">
-            <pre className="m-0 overflow-x-auto font-public-mono text-[13px] leading-[1.8] text-night-fg">
-              <code>{`npx postshow init      # detect supported tools and guide setup
-postshow run           # execute due jobs with your keys or Ollama
-postshow inbox         # list and review what the agent drafted
-postshow mcp           # expose the workspace to your coding agent`}</code>
-            </pre>
+                Propose a contribution ↗
+              </a>
+              <a
+                href={`${REPOSITORY_URL}/issues/new/choose`}
+                className="mk-btn-light"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Report a problem
+              </a>
+            </div>
           </div>
-          <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            Everything above develops in the open in one repository. Credentials never enter a model
-            prompt. A local-only connection keeps its key and raw source records off Postshow cloud;
-            a remote model still receives the evidence packet needed for that run, while Ollama
-            keeps model processing on-device. Postgres is always device-only: the runtime stores its
-            connection string and one owner-configured read-only SELECT in the OS credential store,
-            requires TLS for remote databases, bounds the rows it reads, and syncs only sanitized
-            derived findings. Those rows are part of the evidence packet and reach a remote BYOK
-            model if you select one. Supported outbound actions require an authenticated browser
-            review before they execute.
-          </p>
-        </section>
-
-        <section className="mt-12">
-          <h2 className="m-0 font-public-sans text-[22px] font-semibold tracking-[-0.02em]">
-            Self-hosting, honestly
-          </h2>
-          <p className="m-0 mt-4 max-w-[64ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-            The repository gives you inspectable client surfaces and the local runtime, but it does
-            not ship a supported one-command replacement for Postshow&rsquo;s hosted control plane.
-            Building and operating your own service from the MIT components is possible engineering
-            work, not a turnkey product claim: you own deployment, security, scheduling, billing,
-            upgrades, and compatibility. Eventools does not support or warrant self-managed
-            deployments unless a separate written agreement says otherwise.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <a href="/#waitlist" className="mk-btn-dark">
-              Join the waitlist →
-            </a>
-            <Link to="/security" className="mk-btn-light">
-              Read the security page
-            </Link>
+          <div>
+            <p className="mk-eyebrow m-0 text-shell-fg-3">open-core boundary</p>
+            <h2 className="m-0 mt-2 font-public-sans text-[24px] font-semibold tracking-[-0.02em]">
+              The managed runtime is separate
+            </h2>
+            <p className="m-0 mt-3 font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
+              This repository contains the clients and local runtime. Postshow&rsquo;s supported
+              always-on control plane, scheduler, billing, and hosted model gateway are maintained
+              separately. The MIT components are useful building blocks, but this repository does
+              not promise a one-command clone of the managed service.
+            </p>
+            <p className="m-0 mt-3 font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
+              Read the{' '}
+              <Link to="/security" className="font-medium text-shell-fg underline">
+                security page
+              </Link>{' '}
+              for credential, local-only, model, and data-flow boundaries.
+            </p>
           </div>
         </section>
       </main>
+
       <footer className="border-t border-shell-3">
-        <div className="mx-auto flex w-full max-w-[860px] flex-col gap-4 px-5 py-8 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex w-full max-w-[920px] flex-col gap-4 px-5 py-8 sm:flex-row sm:items-center sm:justify-between">
           <span className="font-public-sans text-[12px] text-shell-fg-3">
             © 2026 Eventools LLC
           </span>

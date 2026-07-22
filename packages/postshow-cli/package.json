@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "author": "Eventools LLC",
   "license": "MIT",
-  "description": "The Postshow CLI: setup wizard, local agent runtime, inbox review, and MCP server for the customer-intelligence teammate at postshow.io.",
+  "description": "The Postshow CLI: setup, local evidence runtime, human review, exports, and MCP access for postshow.io.",
   "keywords": [
     "postshow",
+    "customer-incident",
     "customer-intelligence",
     "product-analytics",
     "cli",

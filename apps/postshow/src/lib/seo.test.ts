@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ROUTES } from '../../../../scripts/prerender-postshow-heads.mjs';
 import { PAGE_META } from './seo';
 
 describe('public route metadata', () => {
@@ -16,5 +17,12 @@ describe('public route metadata', () => {
       .flatMap((meta) => [meta.title, meta.description])
       .join(' ');
     expect(copy).not.toMatch(/every session|free forever|\bSSO\b/i);
+  });
+
+  it('uses the same metadata for runtime and static prerendering', () => {
+    const prerenderedMeta = Object.values(PAGE_META).filter(
+      (meta) => meta.path !== '/' && !meta.noindex
+    );
+    expect(ROUTES).toEqual(prerenderedMeta);
   });
 });

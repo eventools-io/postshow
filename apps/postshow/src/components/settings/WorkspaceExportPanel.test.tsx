@@ -315,13 +315,15 @@ describe('WorkspaceExportPanel', () => {
       configurable: true,
       value: { writeText },
     });
-    const command = `npx postshow export verify ${filename} ${filename}.integrity.json`;
+    const command = `node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js export verify ${filename} ${filename}.integrity.json`;
 
     render(<WorkspaceExportPanel workspaceId={workspaceId} />);
 
     expect(await screen.findByText(command)).toBeInTheDocument();
     expect(
-      screen.getByText('npx postshow export verify <artifact> <manifest>')
+      screen.getByText(
+        'node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js export verify <artifact> <manifest>'
+      )
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /copy verification command/i }));
 

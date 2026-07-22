@@ -15,14 +15,17 @@ describe('LandingPage', () => {
   it('renders the hero headline', () => {
     renderLanding();
     expect(
-      screen.getByRole('heading', { level: 1, name: /what happened last night/i })
+      screen.getByRole('heading', {
+        level: 1,
+        name: /from customer friction to verified recovery/i,
+      })
     ).toBeInTheDocument();
   });
 
   it('renders the waitlist form', () => {
     renderLanding();
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /join the waitlist/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /apply for the beta/i })).toBeInTheDocument();
   });
 
   it('links sign in to the in-app route', () => {
@@ -36,6 +39,15 @@ describe('LandingPage', () => {
   it('carries the eventools brand line', () => {
     renderLanding();
     expect(screen.getAllByText('an eventools product').length).toBeGreaterThan(0);
+  });
+
+  it('links the public product to its GitHub repository', () => {
+    renderLanding();
+    const githubLinks = screen.getAllByRole('link', { name: /github/i });
+    expect(githubLinks.length).toBeGreaterThan(0);
+    for (const link of githubLinks) {
+      expect(link).toHaveAttribute('href', 'https://github.com/eventools-io/postshow');
+    }
   });
 
   it('exposes authoritative legal, support, and status links in the footer', () => {

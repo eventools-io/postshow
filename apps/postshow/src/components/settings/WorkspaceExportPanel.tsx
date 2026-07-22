@@ -3,6 +3,7 @@ import { ErrorRow } from '@/components/page';
 import { fetchPublicReleaseGates } from '@/lib/auth';
 import { PostshowFunctionError } from '@/lib/functionClient';
 import { usePageData } from '@/lib/usePageData';
+import { SOURCE_CLI_COMMAND } from '@/lib/cli';
 import {
   beginWorkspaceExport,
   cancelWorkspaceExport,
@@ -184,7 +185,7 @@ function triggerManifestDownload(status: WorkspaceExportStatus): string {
 }
 
 function exportVerificationCommand(status: WorkspaceExportStatus): string {
-  return `npx postshow export verify ${status.filename} ${status.filename}.integrity.json`;
+  return `${SOURCE_CLI_COMMAND} export verify ${status.filename} ${status.filename}.integrity.json`;
 }
 
 function shouldPoll(status: WorkspaceExportStatus): boolean {
@@ -835,7 +836,7 @@ export function WorkspaceExportPanel({
                 <p className="m-0 font-public-sans text-[11px] leading-[1.5] text-night-fg-2">
                   After downloading both files, verify them locally. The command is{' '}
                   <code className="font-public-mono text-[10px] text-night-fg">
-                    npx postshow export verify &lt;artifact&gt; &lt;manifest&gt;
+                    {SOURCE_CLI_COMMAND} export verify &lt;artifact&gt; &lt;manifest&gt;
                   </code>
                   .
                 </p>

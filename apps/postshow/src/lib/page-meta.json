@@ -1,0 +1,38 @@
+{
+  "landing": {
+    "title": "Postshow · turn customer friction into verified fixes",
+    "description": "Postshow is building a closed-beta workflow that connects real sessions to account impact, prepares product and customer interventions, and verifies the outcome.",
+    "path": "/"
+  },
+  "security": {
+    "title": "Security and data flow · Postshow",
+    "description": "How Postshow handles customer data: write-only keys, local-only connector boundaries, selected model providers, retention, and deletion.",
+    "path": "/security"
+  },
+  "openSource": {
+    "title": "Open source · Postshow",
+    "description": "Explore and contribute to Postshow’s MIT-licensed evidence engine, web and desktop clients, CLI, MCP server, and target incident-flow preview.",
+    "path": "/open-source"
+  },
+  "terms": {
+    "title": "Terms of Service · Postshow",
+    "description": "The terms for Postshow accounts, hosted service, AI output, connected sources, billing, export, and deletion.",
+    "path": "/terms"
+  },
+  "privacy": {
+    "title": "Privacy Policy · Postshow",
+    "description": "How Eventools LLC collects, processes, shares, retains, exports, and deletes information when you use Postshow.",
+    "path": "/privacy"
+  },
+  "cookies": {
+    "title": "Cookies and local storage · Postshow",
+    "description": "The essential browser storage Postshow uses and how optional, consent-based PostHog analytics work.",
+    "path": "/cookies"
+  },
+  "signin": {
+    "title": "Sign in · Postshow",
+    "description": "Sign in to your Postshow workspace.",
+    "path": "/signin",
+    "noindex": true
+  }
+}

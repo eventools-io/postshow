@@ -14,6 +14,7 @@ import { usePageData } from '@/lib/usePageData';
 import { clearIdempotencyKey, idempotencyKey } from '@/lib/idempotency';
 import { PageHeader, LoadingRow, ErrorRow, Section } from '@/components/page';
 import { track } from '@/lib/analytics';
+import { SOURCE_CLI_COMMAND } from '@/lib/cli';
 import type { Job, Run } from '@/lib/types';
 
 const CADENCES: { minutes: number; label: string }[] = [
@@ -225,7 +226,7 @@ function JobRow({
             credentials. Run:
           </p>
           <code className="mt-2 block break-all font-public-mono text-[11px] text-night-fg">
-            npx postshow run --job {job.id}
+            {SOURCE_CLI_COMMAND} run --job {job.id}
           </code>
           <button
             type="button"

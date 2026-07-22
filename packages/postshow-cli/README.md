@@ -1,20 +1,33 @@
 # postshow
 
-The CLI for [Postshow](https://postshow.io), the customer-intelligence teammate by [eventools](https://eventools.io). It watches your product sessions, reads your revenue and error data, and hands you a queue of ready-to-send actions.
+The CLI for [Postshow](https://postshow.io), the closed-beta product by [eventools](https://eventools.io). It runs the current local evidence pipeline, exposes scoped workspace context over MCP, and sends schema-validated findings to the human review surfaces.
 
 MIT licensed. The CLI, the local runtime, and the MCP server are open source; the hosted cloud runtime is a paid service.
 
 ## Setup
 
+The CLI requires a provisioned Postshow workspace, API URL, and workspace access token. This repository does not include a standalone workspace control plane.
+
 ```sh
-npx postshow init
+git clone https://github.com/eventools-io/postshow.git
+cd postshow
+pnpm install
+pnpm --filter postshow build
+cd /absolute/path/to/your-product
+node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js init
 ```
 
-The wizard detects your stack (PostHog, Stripe, Postgres, Sentry, GitHub, Linear, Resend, Slack) from the working directory, verifies each connector and engine credential you choose before saving it, and configures your engine: your own API keys, local models through Ollama, or Postshow's hosted models on a paid plan.
+Replace both placeholder paths for your machine. Run the final command from the product repository you want the wizard to inspect, not from the Postshow clone.
 
-Credentials never pass through a model. Connectors marked local-only keep their credentials on your machine. For a local-only run, gathered source data goes directly to the local or BYOK model you selected for inference; Postshow receives only the model's sanitized findings, not the raw connector records.
+After the first supported npm release, the shorter entry point will be `npx postshow init`. Until then, build the CLI from `main` as shown above.
 
-Postgres is always local-only. Setup asks for a connection string using a read-only database user and one explicit read-only `SELECT`; both stay in the OS credential store. A remote database must explicitly require TLS. The runtime executes the query in a read-only transaction with row, row-size, result-size, and time bounds. Its rows enter the evidence packet for the local or BYOK model selected on that device, so a remote BYOK provider receives them directly; only sanitized derived findings sync to Postshow.
+The command examples below use the future `postshow` binary name. In a source checkout, replace it with `node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js`.
+
+The wizard detects supported configuration in the working directory, verifies each connector and engine credential you choose before saving it, and configures your engine: your own API keys, local models through Ollama, or Postshow's hosted models on a paid plan.
+
+Credentials never pass through a model. Connectors marked local-only keep their credentials on your machine. For a local-only run, gathered source data goes directly to the local or BYOK model you selected for inference; Postshow receives schema-validated derived output rather than raw connector records. That output can still contain account names, facts, evidence excerpts, and other customer context. It is not anonymized; source scoping and data minimization remain separate responsibilities.
+
+Postgres is always local-only. Setup asks for a connection string using a read-only database user and one explicit read-only `SELECT`; both stay in the OS credential store. A remote database must explicitly require TLS. The runtime executes the query in a read-only transaction with row, row-size, result-size, and time bounds. Its rows enter the evidence packet for the local or BYOK model selected on that device, so a remote BYOK provider receives them directly; only schema-validated derived findings sync to Postshow, and those findings can still contain customer context.
 
 ## Commands
 
@@ -53,14 +66,18 @@ Give your coding agent access to the workspace:
 {
   "mcpServers": {
     "postshow": {
-      "command": "npx",
-      "args": ["-y", "postshow", "mcp"]
+      "command": "node",
+      "args": ["/absolute/path/to/postshow/packages/postshow-cli/dist/index.js", "mcp"]
     }
   }
 }
 ```
 
+After the npm release, `"command": "npx"` with `"args": ["-y", "postshow", "mcp"]` will be the shorter equivalent.
+
 Tools: `workspace-status`, `list-inbox`, `review-action-in-web`, `skip-action`, `list-accounts`, `list-field-notes`, `list-jobs`, `list-runs`, `run-local-jobs`, `get-scratchpad`.
+
+Those tools can return scoped workspace data, including account and revenue context, notes, inbox items, runs, and scratchpad content. Connect only a trusted MCP client. Its model provider and retention policy govern any data it receives. Tokens remain workspace-scoped; revoke the workspace token if a client or machine is no longer trusted.
 
 ## Configuration
 

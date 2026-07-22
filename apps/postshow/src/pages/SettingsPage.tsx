@@ -40,6 +40,7 @@ import { AccountDeletionSection } from '@/components/settings/AccountDeletionSec
 import { MemberManagementSection } from '@/components/settings/MemberManagementSection';
 import { LegalLinks } from '@/components/LegalLinks';
 import { fallbackProvider, providersForMode } from '@/lib/engineProviders';
+import { SOURCE_CLI_COMMAND, SOURCE_CLI_GUIDE } from '@/lib/cli';
 
 const MODES: { value: EngineSettings['mode']; label: string; blurb: string }[] = [
   {
@@ -687,9 +688,21 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
     <Section title="Access tokens">
       <div className="ps-card flex flex-col gap-3 p-5">
         <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
-          Tokens authenticate the CLI, the MCP server, and the desktop app. Run{' '}
-          <code className="font-public-mono text-[12px] text-night-fg">npx postshow init</code> and
-          paste one when asked.
+          Tokens authenticate the CLI, the MCP server, and the desktop app. Until the first npm
+          release,{' '}
+          <a
+            href={SOURCE_CLI_GUIDE}
+            className="font-medium text-night-fg underline"
+            target="_blank"
+            rel="noreferrer"
+          >
+            build the CLI from GitHub
+          </a>{' '}
+          and run{' '}
+          <code className="break-all font-public-mono text-[12px] text-night-fg">
+            {SOURCE_CLI_COMMAND} init
+          </code>{' '}
+          in your product repository, then paste one when asked.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input

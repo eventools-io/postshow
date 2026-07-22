@@ -1,49 +1,49 @@
-# Postshow
+# Postshow web
 
-The customer-intelligence teammate, by [eventools](https://eventools.io). Postshow watches your product sessions, reads your revenue and error data, and hands you a queue of ready-to-send actions: outreach drafts, friction tickets, churn-save plays, expansion flags. Its only output is action a human approves.
+The `@eventools/postshow` package contains two browser surfaces:
 
-Production home: [postshow.io](https://postshow.io).
+- the public marketing, open-source, security, sign-in, and legal pages;
+- the current authenticated workspace for Inbox actions, accounts, field notes, connections, work plans, and settings, plus the synthetic preview of the target customer-incident flow.
 
-## Open core
-
-Postshow is open core: the product is open source, the always-on cloud is the business.
-
-MIT licensed (see LICENSE in each package):
-
-- `apps/postshow` - this web app (marketing site + workspace UI)
-- `apps/postshow-desktop` - the menu-bar desktop agent
-- `packages/postshow-cli` - the `postshow` CLI, setup wizard, local runtime, and MCP server
-- `packages/postshow-core` - the shared engine: model catalog, multi-provider calls, task classes, prompts, connector adapters
-
-Proprietary (separate private repository): the hosted cloud runtime, scheduler, billing, and gateway. The free product is usable without hosted models through BYOK keys or local models.
-
-## Plans
-
-- **Free** - the current plan uses your own API keys or local models (Ollama) and includes desktop, CLI, MCP, workspace sync, and on-demand runs.
-- **Solo ($99/mo)** and **Team ($249/mo)** - the always-on cloud runtime plus hosted models. Current self-service plans meter sessions watched and deep dives rather than tokens; over an included budget the agent reduces sampling or defers deep dives instead of surprise-billing.
-- **Enterprise** - custom quotas and seats, metered-usage billing, and security and entitlement planning under an order form.
-
-## Running the open components
-
-This repository contains inspectable clients and the local runtime. It does not contain or package a supported one-command replacement for Postshow's hosted control plane. The MIT components can be used as building blocks for a service you design and operate, but you own its deployment, security, scheduling, billing, upgrades, and compatibility. Eventools does not support or warrant self-managed deployments unless a separate written agreement says otherwise.
+Start with the repository-level [architecture guide](../../docs/ARCHITECTURE.md) and [contribution guide](../../CONTRIBUTING.md).
 
 ## Develop
 
 ```sh
-pnpm dev:postshow          # web app on :5173
+pnpm --filter @eventools/postshow dev
 pnpm --filter @eventools/postshow test
-pnpm --filter postshow build     # the CLI
+pnpm --filter @eventools/postshow type-check
+pnpm --filter @eventools/postshow build
 ```
 
-Supabase Auth requires email confirmation for new accounts. The landing-page beta signup is a
-Netlify Form named `beta-signup`; Netlify detects its static form skeleton in `public/__forms.html`
-at build time, and the React form submits to that path without navigating away.
+The development server runs at `http://localhost:5173` by default.
 
-The authenticated workspace-export client calls
-`VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION` when set and otherwise uses
-`postshow-workspace-export`. It persists only replay-safe request references, streams the private
-NDJSON artifact from an exact-project signed Storage URL, and never buffers the artifact or stores
-the signed URL in the browser.
+## Code map
 
-The managed agent runtime and database migrations live in the separate private cloud repository.
-The open CLI and desktop runtime consume `packages/postshow-core` directly.
+| Path                             | Responsibility                                                    |
+| -------------------------------- | ----------------------------------------------------------------- |
+| `src/pages/marketing`            | Public product, open-source, security, and account-access pages   |
+| `src/pages`                      | Authenticated workspace routes                                    |
+| `src/components/demo`            | Interactive public preview using synthetic data                   |
+| `src/components/settings`        | Workspace, billing, engine, member, export, and deletion controls |
+| `src/state/WorkspaceContext.tsx` | Authenticated workspace state and permissions                     |
+| `src/lib/api.ts`                 | Typed browser boundary for hosted API operations                  |
+| `src/lib/types.ts`               | Persisted client-facing data contracts                            |
+| `src/lib/seo.ts`                 | Route metadata mirrored by static prerendering                    |
+
+## Public claims
+
+Marketing copy must match current behavior and security boundaries. Update `MarketingTruth.test.tsx` when a public claim changes, but do not weaken an assertion merely to make new copy pass.
+
+The closed-beta form is named `beta-signup`. Netlify detects its static skeleton in `public/__forms.html`; the React form submits to the matching endpoint without navigating away.
+
+## Browser boundaries
+
+- Treat API and function responses as untrusted input.
+- Do not persist connector credentials, raw private source records, signed artifact URLs, or private exports in browser storage.
+- Keep hosted actions behind the authenticated API and explicit workspace permissions.
+- Customer communication and code writes remain human approved.
+
+The workspace-export client streams the private NDJSON artifact from an exact-project signed Storage URL. It persists only replay-safe request references and never buffers the export or stores its signed URL in the browser.
+
+Read the root [SECURITY.md](../../SECURITY.md) before changing authentication, invitations, billing, exports, deletion, model settings, or connector handling.

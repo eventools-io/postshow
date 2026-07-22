@@ -7,7 +7,7 @@ import { runDoctor, runStatus } from './commands/status';
 import { runMcpServer } from './mcp';
 import { runExportVerify } from './commands/export';
 
-const HELP = `postshow - the customer-intelligence teammate (postshow.io)
+const HELP = `postshow - local evidence and review tools for Postshow (postshow.io)
 
 Usage:
   postshow init                    Set up connectors, engine, and token

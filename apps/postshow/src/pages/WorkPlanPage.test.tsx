@@ -139,7 +139,9 @@ describe('WorkPlanPage runtime contracts', () => {
     await user.click(await screen.findByRole('button', { name: /run on device/i }));
 
     expect(runNow).not.toHaveBeenCalled();
-    expect(screen.getByText(/npx postshow run --job job-local-1/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/node \/absolute\/path\/to\/postshow\/.+ run --job job-local-1/i)
+    ).toBeInTheDocument();
   });
 
   it('reuses one actor/workspace/job request UUID after a lost response and clears it only on success', async () => {

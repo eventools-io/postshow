@@ -3,14 +3,15 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "description": "Postshow (postshow.io) - the customer-intelligence teammate, by eventools. Marketing site + workspace app.",
+  "description": "Postshow web: public site, current review workspace, and preview of the closed-beta customer-incident direction.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "type-check": "tsc -b --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist .turbo node_modules"
   },
   "dependencies": {

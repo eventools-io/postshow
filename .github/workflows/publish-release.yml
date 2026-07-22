@@ -204,7 +204,7 @@ jobs:
           npm install --global --prefix "$prefix" --no-audit --no-fund "$tarball"
           test -x "$prefix/bin/postshow"
           "$prefix/bin/postshow" --help > "$RUNNER_TEMP/postshow-help.txt"
-          grep -Fx 'postshow - the customer-intelligence teammate (postshow.io)' \
+          grep -Fx 'postshow - local evidence and review tools for Postshow (postshow.io)' \
             "$RUNNER_TEMP/postshow-help.txt"
 
           consumer="$RUNNER_TEMP/postshow-consumer"

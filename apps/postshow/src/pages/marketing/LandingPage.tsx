@@ -6,72 +6,50 @@ import { Logo } from '@/components/Logo';
 import { LegalLinks } from '@/components/LegalLinks';
 import { PAGE_META, usePageMeta } from '@/lib/seo';
 
-const STACK = [
-  'PostHog',
-  'Stripe',
-  'Postgres',
-  'GitHub',
-  'Linear',
-  'Sentry',
-  'Slack',
-  'Resend',
-  'Ollama',
-];
+const STACK = ['PostHog', 'Stripe', 'GitHub', 'Sentry'];
 
 const STEPS = [
   {
     number: '01',
-    title: 'Connect your stack',
-    body: 'PostHog, Stripe, Postgres, GitHub, Sentry. Start with least-scope access, then pick an engine: your API key, local Ollama, or a hosted model.',
+    title: 'Find the customer problem',
+    body: 'Postshow reads recent product behavior and groups corroborating sessions into one incident with replay evidence.',
   },
   {
     number: '02',
-    title: 'It works the night shift',
-    body: 'Sessions get watched and narrated. Anomalies spawn investigations that end in a why, not a chart. Findings become drafts overnight.',
+    title: 'Connect impact to cause',
+    body: 'Stripe identifies the affected accounts and revenue. GitHub and Sentry add the code and error context needed to explain the cause.',
   },
   {
     number: '03',
-    title: 'You approve the moves',
-    body: 'Open the inbox with coffee. Send the upgrade email, file the ticket, skip what is wrong. Every skip teaches it your taste.',
+    title: 'Review, act, and verify',
+    body: 'Review the product fix and customer response together. After the intervention, Postshow checks whether the behavior recovered.',
   },
 ];
 
 const CAPABILITIES = [
   {
     number: '01',
-    tag: 'Watch',
-    title: 'High-signal sessions, narrated',
-    body: 'Postshow prioritizes a bounded sample of useful sessions: where people flowed, hesitated, and what they clicked that did nothing.',
+    tag: 'Evidence',
+    title: 'The receipts behind the incident',
+    body: 'Replay sessions, errors, events, and metrics stay attached to the claim so a human can verify it in one click.',
   },
   {
     number: '02',
-    tag: 'Investigate',
-    title: 'Root cause, not correlation',
-    body: 'A metric moves and it pulls the thread: affected accounts, their sessions, the errors, the PR that shipped that morning.',
+    tag: 'Impact',
+    title: 'The accounts and revenue affected',
+    body: 'Identity resolution connects product behavior to customer accounts and shows where the business impact is concentrated.',
   },
   {
     number: '03',
-    tag: 'Act',
-    title: 'An inbox of drafted moves',
-    body: 'Upgrade emails, bug tickets with repros, churn saves. Approve, edit, or skip; it learns from what you skip.',
+    tag: 'Repair',
+    title: 'One review for both sides',
+    body: 'Review the code fix beside the account follow-up. Nothing merges or sends without a human decision.',
   },
   {
     number: '04',
-    tag: 'Remember',
-    title: 'A dossier per account',
-    body: 'Trajectory, tools adopted, friction hit, revenue. Ask who to talk to this week and get a real answer.',
-  },
-  {
-    number: '05',
-    tag: 'Schedule',
-    title: 'It plans its own work',
-    body: 'The agent proposes its own crons: nightly scans, weekly deep dives, standing investigations. You hold the veto.',
-  },
-  {
-    number: '06',
-    tag: 'Private',
-    title: 'Local-first by design',
-    body: 'Mark a supported source local-only to keep its credentials and raw records off Postshow cloud. Postgres is always device-only and runs one owner-configured, bounded read-only SELECT. Use Ollama to keep model processing on-device too.',
+    tag: 'Outcome',
+    title: 'Proof after the work ships',
+    body: 'Postshow reruns the evidence check and reports whether the customer behavior improved, stayed flat, or needs another intervention.',
   },
 ];
 
@@ -79,11 +57,11 @@ const TIERS = [
   {
     name: 'Free',
     price: '$0',
-    blurb: 'Use your keys or your hardware with the current open-source Free plan.',
+    blurb: 'Planned beta access for provisioned workspaces using your keys or hardware.',
     points: [
       'Any provider in the catalog, or local models via Ollama',
       'Web, desktop, CLI, and MCP server',
-      'All connectors, the full inbox, account dossiers',
+      'Supported connectors, incident evidence, and human-reviewed drafts',
       'Run it on demand or on your machine\u2019s schedule',
     ],
     highlighted: false,
@@ -91,7 +69,7 @@ const TIERS = [
   {
     name: 'Solo',
     price: '$99/mo',
-    blurb: 'Always-on. The agent works with your laptop closed, on our model bill.',
+    blurb: 'Planned always-on access, including hosted model usage.',
     points: [
       '3,000 sessions watched and 20 deep dives a month, included',
       'Hosted Anthropic and OpenAI models, chosen per task',
@@ -103,10 +81,10 @@ const TIERS = [
   {
     name: 'Team',
     price: '$249/mo',
-    blurb: 'Higher volumes and hourly cadence for the whole go-to-market team.',
+    blurb: 'Planned higher volumes and shared review across customer and product teams.',
     points: [
       '12,000 sessions watched and 60 deep dives a month, included',
-      'Five seats for the go-to-market team',
+      'Five seats across product, engineering, and customer teams',
       'Hourly sweeps during launches',
       'Everything in Solo',
     ],
@@ -115,7 +93,7 @@ const TIERS = [
   {
     name: 'Enterprise',
     price: 'Talk to us',
-    blurb: 'For teams with rules about where data lives.',
+    blurb: 'Planned custom terms for teams with rules about where data lives.',
     points: [
       'Custom quotas, seats, and usage billed on your terms',
       'Contract billing with metered usage reconciliation',
@@ -129,11 +107,11 @@ const TIERS = [
 const FAQ = [
   {
     q: 'How is this different from PostHog or Amplitude?',
-    a: 'They tell you what happened, and they are great at it. Postshow starts where the dashboard ends: it watches the sessions behind the numbers, works out why they moved, and hands you a drafted action. PostHog is actually one of our launch connectors.',
+    a: 'Postshow does not replace product analytics. The closed-beta goal is to turn corroborating behavior into a customer incident that connects replay evidence, affected accounts, revenue, suspected product cause, proposed actions, and the result after the work ships. PostHog is the initial behavior source.',
   },
   {
     q: 'Where does my customer data go?',
-    a: "Cloud connector and synced BYOK keys are write-only and stored server-side where no client role can read them. A local-only source keeps its credential and raw records on your device. Postgres is always device-only: it runs one owner-configured, bounded read-only SELECT, requires TLS for a remote database, and syncs only sanitized derived findings. A remote BYOK model still receives that run's evidence packet directly from your device; Ollama keeps model processing on-device. The full data-flow map is on the security page.",
+    a: "Cloud connector and synced BYOK keys are write-only and stored server-side where no client role can read them. A local-only source keeps its credential and raw records on your device. Postgres is always device-only: it runs one owner-configured, bounded read-only SELECT and requires TLS for a remote database. Only schema-validated derived findings sync, but they can still contain customer context. A remote BYOK model receives that run's evidence packet directly from your device; Ollama keeps model processing on-device. The full data-flow map is on the security page.",
   },
   {
     q: 'Which models does it use?',
@@ -141,7 +119,7 @@ const FAQ = [
   },
   {
     q: 'What does it cost?',
-    a: 'The current Free plan uses your own keys or local models and is open source. Hosted is $99/mo (Solo) or $249/mo (Team), with current self-service terms based on sessions watched and deep dives rather than tokens. Checkout and your applicable order show the authoritative plan terms.',
+    a: 'Planned beta pricing is $0 with your own keys or local models, $99/mo for Solo, and $249/mo for Team, using sessions watched and deep dives rather than tokens. There is no public checkout while access remains gated; final order terms will control.',
   },
   {
     q: 'Is it really open source?',
@@ -149,30 +127,7 @@ const FAQ = [
   },
   {
     q: 'When can I use it?',
-    a: 'First beta in 2026. We are building it on our own SaaS first, and the waitlist gets one email when it opens.',
-  },
-];
-
-const SURFACES = [
-  {
-    name: 'Web',
-    detail: 'The synced workspace: inbox, dossiers, field notes, work plan.',
-    code: 'postshow.io',
-  },
-  {
-    name: 'Desktop',
-    detail: 'A menu-bar agent. Runs local jobs while you work, catches up after sleep.',
-    code: 'Postshow.app',
-  },
-  {
-    name: 'CLI',
-    detail: 'The wizard, the local runtime, and inbox review from any terminal.',
-    code: 'npx postshow init',
-  },
-  {
-    name: 'MCP',
-    detail: 'Your coding agent reads dossiers and field notes with scoped workspace access.',
-    code: 'postshow mcp',
+    a: 'The closed beta starts in 2026. We review every application and admit a small group as capacity opens. We only email about the application and access; there is no drip sequence.',
   },
 ];
 
@@ -185,22 +140,30 @@ function Hero() {
           <span className="text-signal-deep">$</span> postshow run
         </p>
         <h1 className="reveal reveal-2 m-0 mt-6 max-w-[16ch] font-public-sans text-[clamp(40px,6vw,76px)] font-semibold leading-[1.04] tracking-[-0.035em] text-shell-fg [text-wrap:balance]">
-          What happened last night,
+          From customer friction
           <em className="block font-normal italic text-shell-fg-3">
-            <span className="highlight-swipe">and why.</span>
+            <span className="highlight-swipe">to verified recovery.</span>
           </em>
         </h1>
         <p className="reveal reveal-3 m-0 mt-7 max-w-[58ch] font-public-sans text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-shell-fg-2">
-          Postshow is an AI teammate for B2B SaaS. It samples product behavior and connected
-          signals, investigates why people convert, stall, or churn, and turns the answer into
-          drafted emails, tickets, and plays. You approve. It learns.
+          We&rsquo;re building Postshow to connect real sessions to affected accounts and revenue,
+          prepare the product fix and customer response, then check whether the intervention worked.
+          Every claim should come with evidence. Nothing ships without you.
         </p>
         <div className="reveal reveal-4 mt-9 flex flex-wrap justify-center gap-3">
           <a href="#waitlist" className="mk-btn-dark">
-            Join the waitlist →
+            Apply for the closed beta →
           </a>
           <a href="#demo" className="mk-btn-light">
-            Try the live demo ↓
+            Review a customer incident ↓
+          </a>
+          <a
+            href="https://github.com/eventools-io/postshow"
+            className="mk-btn-light"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub ↗
           </a>
         </div>
       </div>
@@ -211,9 +174,7 @@ function Hero() {
 function StackStrip() {
   return (
     <section className="mx-auto max-w-[1080px] px-5 pb-20 pt-8">
-      <p className="mk-eyebrow m-0 text-center text-shell-fg-3">
-        connects to the stack you already run
-      </p>
+      <p className="mk-eyebrow m-0 text-center text-shell-fg-3">initial evidence stack</p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
         {STACK.map((name) => (
           <span
@@ -239,8 +200,9 @@ function DemoSection() {
           <em className="font-normal italic text-shell-fg-3">Click around in it.</em>
         </h2>
         <p className="m-0 mt-4 font-public-sans text-[15px] leading-[1.55] text-shell-fg-2">
-          A real morning with Postshow, mock data, every button working. Yours would be drafted from
-          your sessions, your accounts, and your code.
+          This interactive mock shows the target review flow with synthetic data. The current
+          contract supports evidence gathering and draft review; the unified incident and outcome
+          record is the closed-beta direction.
         </p>
       </div>
       <div className="mt-10">
@@ -254,7 +216,7 @@ function Steps() {
   return (
     <section id="how" className="mx-auto max-w-[1080px] scroll-mt-24 px-5 pb-24">
       <h2 className="m-0 font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-shell-fg">
-        How it works
+        The loop we&rsquo;re building
       </h2>
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {STEPS.map((step) => (
@@ -280,14 +242,14 @@ function CapabilitiesSlab() {
     <section className="mx-auto max-w-[1160px] px-4 pb-24">
       <div className="rounded-xl bg-night-0 px-6 py-14 md:px-14 md:py-20">
         <div className="mx-auto max-w-[560px] text-center">
-          <p className="mk-eyebrow m-0 text-night-fg-3">everything it does</p>
+          <p className="mk-eyebrow m-0 text-night-fg-3">the target incident contract</p>
           <h2 className="m-0 mt-3 font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-night-fg">
-            Six capabilities,
+            One customer incident,
             <br />
-            <em className="font-normal italic text-night-fg-3">one teammate.</em>
+            <em className="font-normal italic text-night-fg-3">from evidence to outcome.</em>
           </h2>
         </div>
-        <div className="mt-12 grid gap-x-10 gap-y-10 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-12 grid gap-x-10 gap-y-10 md:grid-cols-2">
           {CAPABILITIES.map((capability) => (
             <div key={capability.number} className="border-t border-night-3 pt-5">
               <p className="m-0 flex items-baseline gap-3 font-public-mono text-[11px] font-medium uppercase tracking-[0.16em]">
@@ -310,55 +272,16 @@ function CapabilitiesSlab() {
   );
 }
 
-function Surfaces() {
-  return (
-    <section className="mx-auto max-w-[1080px] px-5 pb-24">
-      <div className="mx-auto max-w-[640px] text-center">
-        <p className="mk-eyebrow m-0 text-signal-deep">four surfaces, one workspace</p>
-        <h2 className="m-0 mt-3 font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-shell-fg">
-          Wherever you work,
-          <br />
-          <em className="font-normal italic text-shell-fg-3">it&rsquo;s already there.</em>
-        </h2>
-      </div>
-      <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {SURFACES.map((surface) => (
-          <div key={surface.name} className="rounded-lg border border-shell-3 bg-shell-1 p-5">
-            <h3 className="m-0 font-public-sans text-[16px] font-semibold text-shell-fg">
-              {surface.name}
-            </h3>
-            <p className="m-0 mt-2 min-h-[60px] font-public-sans text-[13px] leading-[1.5] text-shell-fg-2">
-              {surface.detail}
-            </p>
-            <code className="mt-3 inline-block rounded-sm bg-shell-2 px-2 py-1 font-public-mono text-[12px] text-shell-fg">
-              {surface.code}
-            </code>
-          </div>
-        ))}
-      </div>
-      <p className="m-0 mt-6 text-center font-public-sans text-[14px] text-shell-fg-2">
-        The CLI, MCP server, desktop agent, and engine are MIT-licensed.{' '}
-        <Link
-          to="/open-source"
-          className="font-medium text-shell-fg underline decoration-signal decoration-2 underline-offset-4 hover:text-signal-deep"
-        >
-          Read the open source story
-        </Link>
-        .
-      </p>
-    </section>
-  );
-}
-
 function Pricing() {
   return (
     <section id="pricing" className="mx-auto max-w-[1080px] scroll-mt-24 px-5 pb-24">
       <h2 className="m-0 font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-shell-fg">
-        Pricing
+        Planned beta pricing
       </h2>
       <p className="m-0 mt-3 max-w-[60ch] font-public-sans text-[15px] leading-[1.55] text-shell-fg-2">
-        Free is free because the model bill is already yours. The hosted tiers exist for the day you
-        want it working while you sleep, priced in sessions watched and deep dives, never tokens.
+        These are the pricing targets for the closed beta, not public offers. Use your own model
+        keys or local hardware for free; planned hosted tiers keep the loop running with your laptop
+        closed.
       </p>
       <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {TIERS.map((tier) => (
@@ -400,7 +323,7 @@ function Pricing() {
               href="#waitlist"
               className={`${tier.highlighted ? 'mk-btn-dark' : 'mk-btn-light'} mt-auto w-full`}
             >
-              Join the waitlist
+              Apply for the beta
             </a>
           </div>
         ))}
@@ -408,11 +331,11 @@ function Pricing() {
       <div className="mt-8 rounded-lg border border-shell-3 bg-shell-1 p-6">
         <p className="mk-eyebrow m-0 text-signal-deep">a note on the numbers</p>
         <p className="m-0 mt-3 max-w-[72ch] font-public-sans text-[14px] leading-[1.6] text-shell-fg-2">
-          The Free plan puts model usage on your provider account or local hardware. Hosted quotas
-          are based on sessions watched and deep dives under the current checkout terms. Over an
-          included budget, the agent thins its sampling and defers deep dives to the next billing
-          period instead of surprise-billing. The MIT-licensed clients and engine remain available
-          if a managed plan stops fitting your needs.
+          The planned Free tier puts model usage on your provider account or local hardware. Hosted
+          quotas are designed around sessions watched and deep dives. Over an included budget, the
+          agent should thin its sampling and defer deep dives to the next billing period instead of
+          surprise-billing. Final beta invitations and order terms will control availability and
+          limits.
         </p>
       </div>
     </section>
@@ -452,11 +375,12 @@ function WaitlistSlab() {
     <section id="waitlist" className="mx-auto max-w-[1160px] scroll-mt-24 px-4 pb-24">
       <div className="flex flex-col items-center rounded-xl bg-night-0 px-6 py-16 text-center md:py-20">
         <h2 className="m-0 max-w-[18ch] font-public-sans text-[clamp(30px,4.4vw,52px)] font-semibold leading-[1.06] tracking-[-0.03em] text-night-fg [text-wrap:balance]">
-          Be in the room for the <em className="font-normal italic text-night-fg-3">first run.</em>
+          Bring one customer problem to the{' '}
+          <em className="font-normal italic text-night-fg-3">closed beta.</em>
         </h2>
         <p className="m-0 mt-4 max-w-[54ch] font-public-sans text-[15px] leading-[1.55] text-night-fg-2">
-          We&rsquo;re building Postshow on our own product before anyone else&rsquo;s. One email
-          when the beta opens. That&rsquo;s the whole list.
+          We&rsquo;re proving the complete incident-to-recovery loop on eventools.io first, then
+          admitting a small group of B2B SaaS teams that use PostHog, Stripe, and GitHub.
         </p>
         <div className="mt-8 flex w-full justify-center">
           <WaitlistForm />
@@ -509,6 +433,14 @@ function SiteFooter() {
             >
               Open source
             </Link>
+            <a
+              href="https://github.com/eventools-io/postshow"
+              className="font-public-sans text-[14px] text-shell-fg-2 hover:text-shell-fg"
+              target="_blank"
+              rel="noreferrer"
+            >
+              GitHub
+            </a>
             <Link
               to="/signin"
               className="font-public-sans text-[14px] text-shell-fg-2 hover:text-shell-fg"
@@ -555,7 +487,6 @@ export function LandingPage() {
         <DemoSection />
         <Steps />
         <CapabilitiesSlab />
-        <Surfaces />
         <Pricing />
         <FaqSection />
         <WaitlistSlab />

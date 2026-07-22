@@ -11,6 +11,7 @@ import { usePageData } from '@/lib/usePageData';
 import { CONNECTORS, canonicalConnectionMeta, type ConnectorDef } from '@/lib/connectors';
 import { PageHeader, LoadingRow, ErrorRow, Section } from '@/components/page';
 import { track } from '@/lib/analytics';
+import { SOURCE_CLI_COMMAND, SOURCE_CLI_GUIDE } from '@/lib/cli';
 import type { Connection } from '@/lib/types';
 
 export function ConnectForm({
@@ -159,9 +160,22 @@ export function ConnectForm({
             {deviceOnly
               ? 'Postgres is always device-only. The web app never accepts its connection string or query. '
               : 'The web app will not collect, transmit, or delete device credentials. '}
-            Run <code className="font-public-mono text-night-fg">npx postshow init</code> on the
-            device that will execute this source. Source data never syncs to Postshow; gathered
-            evidence may be sent to the model provider you choose on that device.
+            Until the first npm release,{' '}
+            <a
+              href={SOURCE_CLI_GUIDE}
+              className="font-medium text-night-fg underline"
+              target="_blank"
+              rel="noreferrer"
+            >
+              build the CLI from GitHub
+            </a>{' '}
+            and run{' '}
+            <code className="break-all font-public-mono text-night-fg">
+              {SOURCE_CLI_COMMAND} init
+            </code>{' '}
+            in your product repository on the device that will execute this source. Source data
+            never syncs to Postshow; gathered evidence may be sent to the model provider you choose
+            on that device.
           </p>
           {existing && !existing.local_only ? (
             <p className="m-0 mt-2 font-public-sans text-[12px] text-warn">

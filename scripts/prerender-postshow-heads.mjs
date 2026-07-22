@@ -6,49 +6,20 @@
  * Crawlers that skip JavaScript would otherwise see the landing page's title
  * and canonical on every route. This writes dist/<route>/index.html copies
  * with the route's own title, description, canonical, and og tags swapped in
- * (Netlify serves existing files before the SPA redirect). Keep the values in
- * sync with apps/postshow/src/lib/seo.ts, which owns them at runtime.
+ * (Netlify serves existing files before the SPA redirect). Runtime and build
+ * both read apps/postshow/src/lib/page-meta.json.
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = join(ROOT, 'apps/postshow/dist');
 const SITE = 'https://postshow.io';
+const META_FILE = join(ROOT, 'apps/postshow/src/lib/page-meta.json');
+const PAGE_META = JSON.parse(readFileSync(META_FILE, 'utf8'));
 
-const ROUTES = [
-  {
-    path: '/security',
-    title: 'Security and data flow · Postshow',
-    description:
-      'How Postshow handles customer data: write-only keys, local-only connector boundaries, selected model providers, retention, and deletion.',
-  },
-  {
-    path: '/open-source',
-    title: 'Open source · Postshow',
-    description:
-      'Postshow is open core: the app, CLI, MCP server, desktop agent, and engine are MIT; the supported always-on cloud runtime is the business.',
-  },
-  {
-    path: '/terms',
-    title: 'Terms of Service · Postshow',
-    description:
-      'The terms for Postshow accounts, hosted service, AI output, connected sources, billing, export, and deletion.',
-  },
-  {
-    path: '/privacy',
-    title: 'Privacy Policy · Postshow',
-    description:
-      'How Eventools LLC collects, processes, shares, retains, exports, and deletes information when you use Postshow.',
-  },
-  {
-    path: '/cookies',
-    title: 'Cookies and local storage · Postshow',
-    description:
-      'The essential browser storage Postshow uses and how optional, consent-based PostHog analytics work.',
-  },
-];
+export const ROUTES = Object.values(PAGE_META).filter((meta) => meta.path !== '/' && !meta.noindex);
 
 function swapHead(html, route) {
   const url = `${SITE}${route.path}`;
@@ -78,4 +49,6 @@ function main() {
   }
 }
 
-main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

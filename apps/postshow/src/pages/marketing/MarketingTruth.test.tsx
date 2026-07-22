@@ -10,23 +10,31 @@ function renderPage(page: React.ReactNode) {
 }
 
 describe('public product claims', () => {
-  it('describes sampling, current plan terms, and the precise Postgres boundary', () => {
+  it('leads with a supported evidence stack and labels the recovery loop as the target', () => {
     renderPage(<LandingPage />);
 
-    expect(screen.getAllByText('Postgres').length).toBeGreaterThan(0);
+    for (const source of ['PostHog', 'Stripe', 'GitHub', 'Sentry']) {
+      expect(screen.getAllByText(source).length).toBeGreaterThan(0);
+    }
+    expect(document.body).toHaveTextContent(/affected accounts and revenue/i);
+    expect(document.body).toHaveTextContent(/checks? whether the intervention worked/i);
+    expect(document.body).toHaveTextContent(/the loop we.re building/i);
+    expect(document.body).toHaveTextContent(/target incident contract/i);
     expect(
-      screen.getAllByText(/one owner-configured, bounded read-only SELECT/i).length
-    ).toBeGreaterThan(0);
-    expect(document.body).toHaveTextContent(/bounded sample of useful sessions/i);
+      screen
+        .getAllByRole('link', { name: /github/i })
+        .some((link) => link.getAttribute('href')?.includes('github.com/eventools-io/postshow'))
+    ).toBe(true);
     expect(document.body).not.toHaveTextContent(/free forever|every session|\bSSO\b/i);
   });
 
-  it('does not present the open components as a turnkey hosted control plane', () => {
+  it('makes the repository useful without claiming a turnkey hosted control plane', () => {
     renderPage(<OpenSourcePage />);
 
-    expect(document.body).toHaveTextContent(/does not ship a supported one-command replacement/i);
-    expect(document.body).toHaveTextContent(/Postgres is always device-only/i);
-    expect(document.body).toHaveTextContent(/remote BYOK model/i);
+    expect(document.body).toHaveTextContent(/does not promise a one-command clone/i);
+    expect(document.body).toHaveTextContent(/propose a contribution/i);
+    expect(document.body).toHaveTextContent(/one install, scoped commands/i);
+    expect(screen.getAllByRole('link', { name: /github|repository/i }).length).toBeGreaterThan(0);
     expect(document.body).not.toHaveTextContent(/free forever|any Supabase project|\bSSO\b/i);
   });
 

@@ -1,47 +1,77 @@
 # Postshow
 
-The customer-intelligence teammate, by [eventools](https://eventools.io). Postshow watches your product sessions, reads your revenue and error data, and hands you a queue of ready-to-send actions: outreach drafts, friction tickets, churn-save plays, expansion flags. Its only output is action a human approves.
+Postshow is becoming the customer-incident agent for B2B software teams. The target product connects product behavior to affected accounts and revenue, prepares the product fix and customer response, and then checks whether the intervention worked.
 
-Production home: [postshow.io](https://postshow.io).
+[Website](https://postshow.io) · [Contributing](CONTRIBUTING.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md) · [Support](SUPPORT.md)
 
-## Open core
+## The product direction
 
-Postshow is open core: the product is open source, the always-on cloud is the business.
+```text
+customer behavior → account and revenue impact → product cause
+        → human-reviewed fix and follow-up → measured outcome
+```
 
-MIT licensed (see LICENSE in each package):
+A Postshow customer incident will keep the evidence, affected accounts, proposed actions, and verification result together. Pull requests are one possible intervention, not the product by themselves. Outbound messages and code changes always require human approval.
 
-- `apps/postshow` - this web app (marketing site + workspace UI)
-- `apps/postshow-desktop` - the menu-bar desktop agent
-- `packages/postshow-cli` - the `postshow` CLI, setup wizard, local runtime, and MCP server
-- `packages/postshow-core` - the shared engine: model catalog, multi-provider calls, task classes, prompts, connector adapters
+Postshow is in closed beta. Provisioned workspaces can use the open clients and local runtime with their own model key or Ollama; the repository does not yet provide a standalone workspace control plane. Managed cloud availability is gated while the complete incident-to-recovery loop is validated.
 
-Proprietary (separate private repo): the hosted cloud runtime, scheduler, billing, and gateway. The current Free plan avoids hosted-model charges by running inference through your BYOK keys or local models, while account, workspace, scheduling, and sync operations still use the Postshow service.
+## Run the repository
 
-The hosted cloud runtime (Supabase migrations and edge functions, billing, scheduler) lives in a separate private repository and vendors this repo's engine core at a pinned ref.
-
-## Plans
-
-- **Free** - the current plan uses your own API keys or local models (Ollama) and includes desktop, CLI, MCP, workspace sync, and on-demand runs.
-- **Solo ($99/mo)** and **Team ($249/mo)** - the always-on cloud runtime plus hosted models. Current self-service plans meter sessions watched and deep dives rather than tokens; over an included budget the agent reduces sampling or defers deep dives instead of surprise-billing.
-- **Enterprise** - custom quotas and seats, metered-usage billing, and security and entitlement planning under an order form.
-
-## Running the open components
-
-This repository contains inspectable clients and the local runtime. It does not contain or package a supported one-command replacement for Postshow's hosted control plane. The MIT components can be used as building blocks for a service you design and operate, but you own its deployment, security, scheduling, billing, upgrades, and compatibility. Eventools does not support or warrant self-managed deployments unless a separate written agreement says otherwise.
-
-## Develop
+Prerequisites: Node.js 24 and pnpm 10.
 
 ```sh
 pnpm install
-pnpm --filter @eventools/postshow dev    # web app on :5173
-pnpm test                                # every package
-pnpm build                               # web (with prerendered heads), cli, desktop
+pnpm --filter @eventools/postshow dev   # web app at http://localhost:5173
+pnpm --filter @eventools/postshow test  # web tests only
 ```
 
-## Community, support, and security
+Before opening a pull request:
 
-- Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
-- Use [SUPPORT.md](SUPPORT.md) to choose between public issues and private product support.
-- Report vulnerabilities privately through [SECURITY.md](SECURITY.md), never in a public issue.
-- Participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-- Maintainers can run `pnpm governance:check` to verify repository policy, license, package, and workflow invariants offline.
+```sh
+pnpm test
+pnpm type-check
+pnpm lint
+pnpm build
+pnpm format:check
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for scoped commands, contribution rules, and the pull-request path.
+
+## Repository map
+
+| Path                                               | What lives there                                                                      | Start here when…                              |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------- |
+| [`packages/postshow-core`](packages/postshow-core) | Connector adapters, model execution, prompts, sanitization, schedules, and cost rules | Changing evidence gathering or agent behavior |
+| [`packages/postshow-cli`](packages/postshow-cli)   | CLI, local runtime, workspace setup, exports, and MCP server                          | Improving terminal or coding-agent workflows  |
+| [`apps/postshow`](apps/postshow)                   | Marketing site and authenticated web product                                          | Changing customer-facing web behavior         |
+| [`apps/postshow-desktop`](apps/postshow-desktop)   | Desktop scheduler, credential access, diagnostics, and packaging                      | Changing local background execution           |
+
+The architectural flow and cross-package contracts are documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Product laws
+
+Contributions must preserve these invariants:
+
+- Connector access is read-only unless a user explicitly approves a supported action.
+- Credentials never enter model prompts.
+- Local-only sources keep credentials and raw records off Postshow cloud.
+- Customer communication never sends automatically.
+- Generated code never merges automatically.
+- Evidence and affected-customer context must stay attached to consequential actions.
+
+## Contributing
+
+Issues and pull requests are welcome. A good first contribution is small enough to verify locally and comes with a regression test or a synthetic connector fixture where appropriate.
+
+1. Search [existing issues](https://github.com/eventools-io/postshow/issues).
+2. If no issue matches, [propose a focused change](https://github.com/eventools-io/postshow/issues/new?template=feature_request.yml) before starting a large contribution.
+3. Follow [CONTRIBUTING.md](CONTRIBUTING.md).
+4. Never include credentials, customer data, or private service logs in an issue or fixture.
+
+Use [SUPPORT.md](SUPPORT.md) for hosted-product help and [SECURITY.md](SECURITY.md) for private vulnerability reports. Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Open-core boundary
+
+The web app, desktop runtime, CLI, MCP server, and shared engine are MIT licensed. The supported always-on control plane, scheduler, billing system, and hosted model gateway are maintained separately. This repository provides inspectable clients and a local runtime; it does not promise a one-command clone of the managed service.
+
+Each distributable package includes its own `LICENSE`. Maintainers can run `pnpm governance:check` to verify repository, package, workflow, and licensing invariants.

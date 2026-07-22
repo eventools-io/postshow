@@ -12,13 +12,12 @@ concurrency:
 permissions:
   contents: read
 
-# Linux jobs use the private eventools pool while the repository is private.
-# Delete CI_GENERAL_RUNNER_LABELS_JSON before accepting fork pull requests in a
-# public repository so untrusted code falls back to GitHub-hosted runners.
+# Pull requests always use GitHub-hosted runners because they execute contributor
+# code. Trusted pushes may use the private eventools pool when the variable is set.
 jobs:
   quality:
     name: Quality (lint, types, tests, builds)
-    runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -67,7 +66,7 @@ jobs:
 
   audit:
     name: Dependency Audit
-    runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -78,7 +77,7 @@ jobs:
   unslop:
     name: Unslop Checks
     if: github.event_name == 'pull_request'
-    runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -91,7 +90,7 @@ jobs:
   pr-title:
     name: Conventional PR Title
     if: github.event_name == 'pull_request'
-    runs-on: ${{ fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
       PR_TITLE: ${{ github.event.pull_request.title }}

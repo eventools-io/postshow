@@ -26,7 +26,7 @@ export function PillNav() {
 
         <nav
           aria-label="Main"
-          className="hidden items-center gap-1 rounded-pill border border-shell-3 bg-shell-1 px-2 py-1 shadow-[0_2px_16px_rgba(20,23,15,0.06)] backdrop-blur md:flex"
+          className="hidden items-center gap-1 rounded-pill border border-shell-3 bg-shell-1 px-2 py-1 shadow-[0_2px_16px_rgba(20,23,15,0.06)] backdrop-blur lg:flex"
         >
           {LINKS.map((link) => (
             <a
@@ -43,6 +43,14 @@ export function PillNav() {
           >
             Security
           </Link>
+          <a
+            href="https://github.com/eventools-io/postshow"
+            className="rounded-pill px-4 py-2 font-public-sans text-[13px] text-shell-fg-2 hover:bg-shell-2 hover:text-shell-fg"
+            target="_blank"
+            rel="noreferrer"
+          >
+            GitHub ↗
+          </a>
         </nav>
 
         <div className="flex items-center gap-1 rounded-pill border border-shell-3 bg-shell-1 p-1 shadow-[0_2px_16px_rgba(20,23,15,0.06)] backdrop-blur">
@@ -53,7 +61,7 @@ export function PillNav() {
             Sign in
           </Link>
           <a href="#waitlist" className="mk-btn-dark !h-8 !px-4 text-[13px]">
-            Join the waitlist
+            Closed beta
           </a>
         </div>
       </div>

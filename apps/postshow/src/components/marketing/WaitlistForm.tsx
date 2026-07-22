@@ -23,7 +23,7 @@ export function WaitlistForm() {
     return (
       <p className="m-0 flex items-center gap-2 font-public-mono text-[13px] uppercase tracking-[0.12em] text-signal">
         <span className="inline-block h-[6px] w-[6px] bg-signal" aria-hidden />
-        You&rsquo;re on the list.
+        Application received.
       </p>
     );
   }
@@ -60,7 +60,7 @@ export function WaitlistForm() {
             className="h-11 flex-1 rounded-pill border border-night-4 bg-night-2 px-5 font-public-sans text-[14px] text-night-fg placeholder:text-night-fg-3 focus:border-signal focus:outline-none"
           />
           <button type="submit" disabled={state === 'submitting'} className="mk-btn-signal">
-            {state === 'submitting' ? 'Joining…' : 'Join the waitlist'}
+            {state === 'submitting' ? 'Applying…' : 'Apply for the beta'}
           </button>
         </div>
       </form>
@@ -75,7 +75,7 @@ export function WaitlistForm() {
         </p>
       )}
       <p className="m-0 font-public-mono text-[11px] uppercase tracking-[0.12em] text-night-fg-3">
-        No spam, no drip sequence.
+        We review each application. No drip sequence.
       </p>
     </div>
   );

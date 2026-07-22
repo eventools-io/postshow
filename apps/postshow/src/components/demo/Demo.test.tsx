@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { Demo } from './Demo';
 
 describe('Demo inbox', () => {
-  it('approves a draft and counts down to inbox zero with the waitlist cta', async () => {
+  it('reviews an incident and counts down to inbox zero with the beta cta', async () => {
     const user = userEvent.setup();
     render(<Demo />);
 
@@ -14,11 +14,21 @@ describe('Demo inbox', () => {
     expect(screen.getByText(/upgrade email sent/i)).toBeInTheDocument();
     expect(screen.getByText('1 approved')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /open ticket: friction · onboarding/i }));
+    await user.click(
+      screen.getByRole('button', { name: /review incident: customer incident · onboarding/i })
+    );
+    expect(
+      screen.getByRole('heading', {
+        name: /seven trials stalled while connecting their first data source/i,
+      })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/no revenue impact is claimed yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/outcome is pending/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /approve both drafts/i }));
     await user.click(screen.getByRole('button', { name: /skip: churn risk · deployhub/i }));
 
     expect(screen.getByText(/inbox zero\. enjoy the coffee\./i)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /get yours when the beta opens/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /apply for the closed beta/i })).toHaveAttribute(
       'href',
       '#waitlist'
     );
@@ -70,8 +80,8 @@ describe('Demo cross-tab flows', () => {
     render(<Demo />);
 
     await user.click(screen.getByRole('button', { name: 'Connections' }));
-    await user.click(screen.getByRole('button', { name: /connect github/i }));
-    expect(screen.queryByRole('button', { name: /connect github/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /connect sentry/i }));
+    expect(screen.queryByRole('button', { name: /connect sentry/i })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Your key' }));
     expect(screen.getByText('engine · your key')).toBeInTheDocument();
