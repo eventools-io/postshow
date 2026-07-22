@@ -78,7 +78,9 @@ function isBenignAuthRefreshException(result: CaptureResult): boolean {
   const types = properties?.$exception_types;
   const values = properties?.$exception_values;
   return (
-    Array.isArray(types) && Array.isArray(values) && types.some((t, i) => isStaleRefreshToken(t, values[i]))
+    Array.isArray(types) &&
+    Array.isArray(values) &&
+    types.some((t, i) => isStaleRefreshToken(t, values[i]))
   );
 }
 
