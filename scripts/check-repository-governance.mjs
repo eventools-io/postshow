@@ -86,6 +86,18 @@ export function inlineScriptHashes(html) {
   );
 }
 
+export function dependencyLicenseArguments({ siteDependencies = false } = {}) {
+  const filter = siteDependencies ? ['--filter', '@eventools/postshow'] : [];
+  return [...filter, 'licenses', 'list', '--prod', '--json'];
+}
+
+export function commandFailureMessage(error) {
+  const detail = [error?.stderr, error?.stdout]
+    .map((output) => output?.toString().trim())
+    .find(Boolean);
+  return detail ? `${error.message}\n${detail}` : error.message;
+}
+
 function json(path) {
   return JSON.parse(readFileSync(resolve(root, path), 'utf8'));
 }
@@ -163,11 +175,11 @@ function checkLicenseCopies(failures) {
   }
 }
 
-function checkDependencyLicenses(failures) {
+function checkDependencyLicenses(failures, { siteDependencies = false } = {}) {
   let licenses;
   try {
     licenses = JSON.parse(
-      execFileSync('pnpm', ['licenses', 'list', '--prod', '--json'], {
+      execFileSync('pnpm', dependencyLicenseArguments({ siteDependencies }), {
         cwd: root,
         encoding: 'utf8',
         maxBuffer: 16 * 1024 * 1024,
@@ -175,7 +187,14 @@ function checkDependencyLicenses(failures) {
       })
     );
   } catch (error) {
-    failures.push(`could not inventory installed production dependency licenses: ${error.message}`);
+    failures.push(
+      `could not inventory installed production dependency licenses: ${commandFailureMessage(error)}`
+    );
+    return;
+  }
+
+  if (Object.keys(licenses).length === 0) {
+    failures.push('production dependency license inventory was empty');
     return;
   }
 
@@ -267,12 +286,15 @@ function checkSiteCsp(failures, htmlPath) {
   }
 }
 
-export function runGovernanceCheck({ siteHtmlPath = 'apps/postshow/index.html' } = {}) {
+export function runGovernanceCheck({
+  siteHtmlPath = 'apps/postshow/index.html',
+  siteDependencies = false,
+} = {}) {
   const failures = [];
   checkPolicies(failures);
   checkPackageMetadata(failures);
   checkLicenseCopies(failures);
-  checkDependencyLicenses(failures);
+  checkDependencyLicenses(failures, { siteDependencies });
   checkWorkflows(failures);
   checkSiteCsp(failures, siteHtmlPath);
 
@@ -288,6 +310,7 @@ if (invokedPath === fileURLToPath(import.meta.url)) {
       siteHtmlPath: process.argv.includes('--built-site')
         ? 'apps/postshow/dist/index.html'
         : 'apps/postshow/index.html',
+      siteDependencies: process.argv.includes('--site-dependencies'),
     });
     process.stdout.write('Repository governance check passed.\n');
   } catch (error) {

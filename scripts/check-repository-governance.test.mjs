@@ -2,12 +2,34 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   actionReferences,
+  commandFailureMessage,
   capturesNpmPackFilenameSafely,
+  dependencyLicenseArguments,
   hasWorkflowDefaultPermissions,
   immutableReference,
   inlineScriptHashes,
   inlineScripts,
 } from './check-repository-governance.mjs';
+
+test('keeps repository and site dependency license inventories distinct', () => {
+  assert.deepEqual(dependencyLicenseArguments(), ['licenses', 'list', '--prod', '--json']);
+  assert.deepEqual(dependencyLicenseArguments({ siteDependencies: true }), [
+    '--filter',
+    '@eventools/postshow',
+    'licenses',
+    'list',
+    '--prod',
+    '--json',
+  ]);
+});
+
+test('includes captured command diagnostics in governance failures', () => {
+  assert.equal(
+    commandFailureMessage({ message: 'command failed', stderr: 'missing package index\n' }),
+    'command failed\nmissing package index'
+  );
+  assert.equal(commandFailureMessage({ message: 'command failed' }), 'command failed');
+});
 
 test('isolates npm pack filename from lifecycle output', () => {
   assert.equal(

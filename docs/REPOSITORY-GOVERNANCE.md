@@ -19,6 +19,12 @@ the absence of `pull_request_target` and `workflow_run` triggers. It also requir
 the two non-executable JSON-LD blocks in the site shell to match the exact SHA-256
 hashes in the deployed Content Security Policy and rejects any other inline script.
 
+The site-only production build runs the same controls against the built HTML while
+scoping the license inventory to `@eventools/postshow` and its production dependency
+closure. This keeps a web deploy independent of unshipped desktop, CLI, and build
+tool dependencies. The default check and the full repository build continue to
+inventory every workspace's production dependencies.
+
 Dependabot is configured for weekly pnpm-workspace and GitHub Actions updates.
 CODEOWNERS names the two current repository administrators, and issue and
 pull-request templates route sensitive reports away from public issues.
