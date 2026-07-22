@@ -1,0 +1,69 @@
+name: ButtonMash
+
+on:
+  pull_request:
+    paths:
+      - 'apps/postshow/**'
+      - 'packages/postshow-core/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'buttonmash.config.json'
+      - '.github/actions/setup-node-pnpm/**'
+      - '.github/workflows/buttonmash.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: buttonmash-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  buttonmash:
+    name: Public web app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: ./.github/actions/setup-node-pnpm
+      - name: Build the Postshow web app
+        run: pnpm build:postshow
+      - name: Start the production preview
+        run: |
+          set -euo pipefail
+          pnpm --filter @eventools/postshow preview \
+            --host 127.0.0.1 --port 4173 --strictPort \
+            > "$RUNNER_TEMP/postshow-preview.log" 2>&1 &
+          echo "POSTSHOW_PREVIEW_PID=$!" >> "$GITHUB_ENV"
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:4173/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          tail -n 100 "$RUNNER_TEMP/postshow-preview.log" >&2 || true
+          exit 1
+      - name: Run ButtonMash 0.2.0
+        # Exact release commit keeps contributor-triggered CI immutable.
+        uses: cj-vana/buttonmash@3dfe5aa15e824accfd5f72c176ac64b2f63450db # v0.2.0
+        with:
+          target: http://127.0.0.1:4173/
+          version: 0.2.0
+          args: >-
+            --seed postshow-ci
+            --dry-run
+            --max-actions 120
+            --max-duration 120
+            --route /open-source /security
+      - name: Stop the production preview
+        if: ${{ always() && env.POSTSHOW_PREVIEW_PID != '' }}
+        run: kill "$POSTSHOW_PREVIEW_PID" 2>/dev/null || true
+      - name: Upload preview log on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postshow-buttonmash-preview-log
+          path: ${{ runner.temp }}/postshow-preview.log
+          if-no-files-found: ignore
+          retention-days: 3
