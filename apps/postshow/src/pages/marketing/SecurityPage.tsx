@@ -37,7 +37,7 @@ const FLOWS = [
 
 const SUBPROCESSORS = [
   { name: 'Supabase', purpose: 'database, auth, and function hosting' },
-  { name: 'Netlify', purpose: 'static hosting for this site and the app shell' },
+  { name: 'Netlify', purpose: 'static hosting, app-shell delivery, and beta-signup forms' },
   { name: 'Stripe', purpose: 'billing for the hosted plan' },
   { name: 'Metronome', purpose: 'enterprise usage metering and billing reconciliation' },
   {

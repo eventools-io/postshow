@@ -35,9 +35,9 @@ pnpm --filter @eventools/postshow test
 pnpm --filter postshow build     # the CLI
 ```
 
-Supabase Auth requires email confirmation for new accounts. The waitlist calls
-`VITE_POSTSHOW_WAITLIST_FUNCTION` when set and otherwise uses `postshow-waitlist`; its public Edge
-endpoint applies keyed email/IP limits before the service-only database admission RPC.
+Supabase Auth requires email confirmation for new accounts. The landing-page beta signup is a
+Netlify Form named `beta-signup`; Netlify detects its static form skeleton in `public/__forms.html`
+at build time, and the React form submits to that path without navigating away.
 
 The authenticated workspace-export client calls
 `VITE_POSTSHOW_WORKSPACE_EXPORT_FUNCTION` when set and otherwise uses

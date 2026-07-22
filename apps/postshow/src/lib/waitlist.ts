@@ -1,46 +1,10 @@
 export type WaitlistResult = 'joined' | 'invalid' | 'error';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_EMAIL_LENGTH = 320;
-const MAX_WAITLIST_RESPONSE_BYTES = 1_024;
-
-async function readBoundedJsonObject(response: Response): Promise<Record<string, unknown> | null> {
-  const declaredLength = response.headers.get('content-length');
-  if (
-    declaredLength !== null &&
-    /^\d+$/.test(declaredLength) &&
-    Number(declaredLength) > MAX_WAITLIST_RESPONSE_BYTES
-  ) {
-    return null;
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) return null;
-
-  const decoder = new TextDecoder('utf-8', { fatal: true });
-  let body = '';
-  let receivedBytes = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      receivedBytes += value.byteLength;
-      if (receivedBytes > MAX_WAITLIST_RESPONSE_BYTES) {
-        await reader.cancel();
-        return null;
-      }
-      body += decoder.decode(value, { stream: true });
-    }
-    body += decoder.decode();
-
-    const parsed = JSON.parse(body) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
+const NETLIFY_FORM_NAME = 'beta-signup';
+const NETLIFY_FORM_PATH = '/__forms.html';
 
 export function isValidEmail(value: string): boolean {
   const trimmed = value.trim();
@@ -52,34 +16,20 @@ export async function joinWaitlist(email: string, requestId: string): Promise<Wa
   if (!isValidEmail(trimmed)) {
     return 'invalid';
   }
-  if (!requestId) return 'error';
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  const functionName =
-    import.meta.env.VITE_POSTSHOW_WAITLIST_FUNCTION?.trim() || 'postshow-waitlist';
-  if (!supabaseUrl || !supabaseKey) {
-    return 'error';
-  }
+  if (!UUID_PATTERN.test(requestId)) return 'error';
+
   try {
-    const response = await fetch(
-      `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/${encodeURIComponent(functionName)}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: supabaseKey,
-        },
-        body: JSON.stringify({
-          request_id: requestId,
-          email: trimmed,
-        }),
-      }
-    );
-    if (response.status !== 202) return 'error';
-    const payload = await readBoundedJsonObject(response);
-    return payload !== null && Object.keys(payload).length === 1 && payload.ok === true
-      ? 'joined'
-      : 'error';
+    const response = await fetch(NETLIFY_FORM_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        'form-name': NETLIFY_FORM_NAME,
+        email: trimmed,
+        source: 'landing',
+        request_id: requestId,
+      }).toString(),
+    });
+    return response.ok ? 'joined' : 'error';
   } catch {
     return 'error';
   }

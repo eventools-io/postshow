@@ -36,7 +36,7 @@ const PROVIDERS = [
   {
     term: 'Netlify',
     detail:
-      'Delivery of the postshow.io site and web-app shell, including ordinary request and security logs.',
+      'Delivery of the postshow.io site and web-app shell, beta-signup form collection, and ordinary request and security logs.',
   },
   {
     term: 'Stripe',

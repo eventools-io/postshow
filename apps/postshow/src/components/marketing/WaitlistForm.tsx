@@ -3,8 +3,8 @@ import { joinWaitlist } from '@/lib/waitlist';
 
 type FormState = 'idle' | 'submitting' | 'joined' | 'invalid' | 'error';
 
-/** Waitlist form for the dark closing slab. The Edge admission endpoint uses
- * keyed identifiers and server-side limits before any database admission. */
+/** Waitlist form for the dark closing slab. Netlify detects the matching static
+ * form skeleton at build time and stores each beta signup submission. */
 export function WaitlistForm() {
   const [email, setEmail] = useState('');
   const [state, setState] = useState<FormState>('idle');
@@ -30,13 +30,23 @@ export function WaitlistForm() {
 
   return (
     <div className="flex w-full max-w-[440px] flex-col items-center gap-3">
-      <form onSubmit={handleSubmit} className="flex w-full flex-col gap-3">
+      <form
+        name="beta-signup"
+        method="POST"
+        data-netlify="true"
+        onSubmit={handleSubmit}
+        className="flex w-full flex-col gap-3"
+      >
+        <input type="hidden" name="form-name" value="beta-signup" />
+        <input type="hidden" name="source" value="landing" />
+        <input type="hidden" name="request_id" value={requestId.current ?? ''} />
         <div className="flex w-full flex-col gap-3 sm:flex-row">
           <label htmlFor="waitlist-email" className="sr-only">
             Email address
           </label>
           <input
             id="waitlist-email"
+            name="email"
             type="email"
             autoComplete="email"
             required
