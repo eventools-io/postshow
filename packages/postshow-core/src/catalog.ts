@@ -386,8 +386,8 @@ export function tierDefault(providerId: string, tier: ModelTier): CatalogModel |
 }
 
 /** Cost of one model call in USD micros (1e-6 USD), from catalog list prices.
- * Unknown models (compatible, ollama, drifted ids) cost 0 - we never invent
- * a price for a model we cannot identify. */
+ * Unknown model ids fail closed so hosted usage cannot become invisible when
+ * a provider changes an id or a catalog update drifts. */
 export function estimateCostUsdMicros(
   providerId: string,
   modelId: string,
@@ -395,7 +395,16 @@ export function estimateCostUsdMicros(
   outputTokens: number
 ): number {
   const model = getModel(providerId, modelId);
-  if (!model) return 0;
+  if (!model) throw new Error(`cost estimate unavailable for ${providerId}/${modelId}`);
+  if (
+    !Number.isSafeInteger(inputTokens) ||
+    inputTokens < 0 ||
+    !Number.isSafeInteger(outputTokens) ||
+    outputTokens < 0 ||
+    inputTokens + outputTokens === 0
+  ) {
+    throw new Error('cost estimate requires finite nonnegative token usage');
+  }
   const usd =
     (inputTokens / 1_000_000) * model.inputPerMtokUsd +
     (outputTokens / 1_000_000) * model.outputPerMtokUsd;

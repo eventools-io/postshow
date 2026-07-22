@@ -59,11 +59,26 @@ describe('catalog', () => {
     expect(tierDefault('ollama', 'fast')).toBeNull();
   });
 
-  it('estimates cost from list prices and refuses to price unknown models', () => {
+  it('estimates known list prices and fails closed for unknown models', () => {
     // Haiku: 12K in at $1/M + 3K out at $5/M = $0.027 = 27,000 micros.
     expect(estimateCostUsdMicros('anthropic', 'claude-haiku-4-5', 12_000, 3_000)).toBe(27_000);
-    expect(estimateCostUsdMicros('ollama', 'llama3.3', 100_000, 5_000)).toBe(0);
-    expect(estimateCostUsdMicros('anthropic', 'claude-2.1', 1000, 1000)).toBe(0);
+    expect(() => estimateCostUsdMicros('ollama', 'llama3.3', 100_000, 5_000)).toThrow(
+      'cost estimate unavailable'
+    );
+    expect(() => estimateCostUsdMicros('anthropic', 'claude-2.1', 1000, 1000)).toThrow(
+      'cost estimate unavailable'
+    );
+    for (const [input, output] of [
+      [0, 0],
+      [-1, 1],
+      [Number.NaN, 1],
+      [Number.POSITIVE_INFINITY, 1],
+      [1.5, 1],
+    ] as const) {
+      expect(() => estimateCostUsdMicros('anthropic', 'claude-haiku-4-5', input, output)).toThrow(
+        'finite nonnegative token usage'
+      );
+    }
   });
 });
 
@@ -479,18 +494,49 @@ describe('plans', () => {
   });
 
   it('prices hosted tiers above modeled cost with margin', () => {
+    const profiles = [
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.sessionsWatched / 40,
+        inputTokens: 12_000,
+        outputTokens: 3_000,
+        allowedTiers: new Set(['fast']),
+      },
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.investigations,
+        inputTokens: 12_000,
+        outputTokens: 3_000,
+        allowedTiers: new Set(['fast', 'standard']),
+      },
+      {
+        calls: (plan: (typeof PLANS)['solo']) => plan.quota.deepDives,
+        inputTokens: 25_000,
+        outputTokens: 8_000,
+        allowedTiers: new Set(['fast', 'standard', 'frontier']),
+      },
+    ];
     const profileCost = (plan: (typeof PLANS)['solo']) => {
-      const narrationCalls = plan.quota.sessionsWatched / 40;
-      const narration =
-        narrationCalls *
-        (estimateCostUsdMicros('anthropic', 'claude-haiku-4-5', 12_000, 3_000) / 1e6);
-      const deepDives =
-        plan.quota.deepDives *
-        (estimateCostUsdMicros('anthropic', 'claude-opus-4-8', 25_000, 8_000) / 1e6);
-      const investigations =
-        plan.quota.investigations *
-        (estimateCostUsdMicros('anthropic', 'claude-sonnet-5', 12_000, 3_000) / 1e6);
-      return (narration + deepDives + investigations) * 1.05;
+      const worstCase = profiles.reduce((total, profile) => {
+        const selectableCosts = CATALOG.flatMap((provider) =>
+          provider.hosted
+            ? provider.models
+                .filter(
+                  (model) => model.hostedEligible === true && profile.allowedTiers.has(model.tier)
+                )
+                .map(
+                  (model) =>
+                    estimateCostUsdMicros(
+                      provider.id,
+                      model.id,
+                      profile.inputTokens,
+                      profile.outputTokens
+                    ) / 1e6
+                )
+            : []
+        );
+        expect(selectableCosts.length).toBeGreaterThan(0);
+        return total + profile.calls(plan) * Math.max(...selectableCosts);
+      }, 0);
+      return worstCase * 1.05;
     };
     expect(PLANS.solo.priceUsdMonthly! / profileCost(PLANS.solo)).toBeGreaterThan(3);
     expect(PLANS.team.priceUsdMonthly! / profileCost(PLANS.team)).toBeGreaterThan(3);

@@ -13,12 +13,48 @@ export interface ModelCall {
   system: string;
   prompt: string;
   maxTokens?: number;
+  /** Opt in at the runtime boundary that owns retry cost and reconciliation. */
+  retryTransientErrors?: boolean;
 }
 
 export interface ModelResult {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /** Present for current engines; optional for backwards-compatible callers and test doubles. */
+  usageValid?: boolean;
+  /** Number of HTTP attempts used by this call. */
+  attempts?: number;
+  /** True when any attempt may have been accepted before a transport failure. */
+  billingAmbiguous?: boolean;
+}
+
+export class ModelRequestError extends Error {
+  readonly status: number | null;
+  readonly attempts: number;
+  readonly billingAmbiguous: boolean;
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+  readonly usageValid: boolean | null;
+
+  constructor(
+    message: string,
+    status: number | null,
+    attempts: number,
+    usage?: { inputTokens: number; outputTokens: number; usageValid: boolean },
+    billingAmbiguous?: boolean
+  ) {
+    super(message);
+    this.name = 'ModelRequestError';
+    this.status = status;
+    this.attempts = attempts;
+    this.billingAmbiguous =
+      billingAmbiguous ??
+      (!usage?.usageValid && attempts > 0 && (status === null || status >= 500 || status === 200));
+    this.inputTokens = usage?.inputTokens ?? null;
+    this.outputTokens = usage?.outputTokens ?? null;
+    this.usageValid = usage?.usageValid ?? null;
+  }
 }
 
 /** Provider-specific reasoning controls for one request body. Exported for
@@ -109,7 +145,10 @@ function trimBase(url: string): string {
 
 export const MODEL_TIMEOUT_MS = 90_000;
 export const LOCAL_MODEL_TIMEOUT_MS = 10 * 60_000;
+export const MODEL_MAX_ATTEMPTS = 3;
 const MAX_MODEL_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MODEL_RETRY_BASE_MS = 250;
+const MODEL_RETRY_AFTER_CAP_MS = 30_000;
 
 /** Resolve the only endpoint a model call may use. Curated providers are
  * pinned to the catalog. Local mode is loopback-only. A custom compatible
@@ -193,37 +232,123 @@ function jsonRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function retryDelayMs(response: Response, attempt: number): number | null {
+  const retryAfter = response.headers.get('retry-after')?.trim() ?? '';
+  if (/^\d+(?:\.\d+)?$/.test(retryAfter)) {
+    const delay = Math.max(0, Number(retryAfter) * 1_000);
+    return delay <= MODEL_RETRY_AFTER_CAP_MS ? delay : null;
+  }
+  const retryAt = Date.parse(retryAfter);
+  if (Number.isFinite(retryAt)) {
+    const delay = Math.max(0, retryAt - Date.now());
+    return delay <= MODEL_RETRY_AFTER_CAP_MS ? delay : null;
+  }
+  const ceiling = MODEL_RETRY_BASE_MS * 2 ** (attempt - 1);
+  return Math.floor(Math.random() * (ceiling + 1));
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function fetchModelJson(
   url: string,
   init: RequestInit,
-  timeoutMs = MODEL_TIMEOUT_MS
-): Promise<Record<string, unknown>> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
-    if (response.status >= 300 && response.status < 400) {
-      throw new Error('model endpoint redirects are not allowed');
+  timeoutMs = MODEL_TIMEOUT_MS,
+  maxAttempts = 1
+): Promise<{ data: Record<string, unknown>; attempts: number; billingAmbiguous: boolean }> {
+  const deadline = Date.now() + timeoutMs;
+  let startedAttempts = 0;
+  let billingAmbiguous = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new ModelRequestError('model call timed out', null, startedAttempts);
     }
-    const text = await readTextBounded(response);
-    if (!response.ok) {
-      // Do not surface provider-controlled headers or bodies: compatible
-      // endpoints and proxies can reflect credentials into either one.
-      throw new Error(`model call failed (${response.status})`);
-    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), remaining);
+    let retryIn: number | null = null;
+    let responseStatus: number | null = null;
     try {
-      return jsonRecord(JSON.parse(text));
-    } catch {
-      throw new Error('model returned invalid JSON');
+      startedAttempts = attempt;
+      const response = await fetch(url, { ...init, redirect: 'manual', signal: controller.signal });
+      responseStatus = response.status;
+      if (response.status >= 500) billingAmbiguous = true;
+      if (response.status >= 300 && response.status < 400) {
+        throw new Error('model endpoint redirects are not allowed');
+      }
+      const retryable = response.status === 429 || response.status >= 500;
+      if (retryable && attempt < maxAttempts) {
+        retryIn = retryDelayMs(response, attempt);
+        if (retryIn === null || retryIn >= deadline - Date.now()) {
+          await response.body?.cancel().catch(() => undefined);
+          throw new ModelRequestError(
+            `model call failed (${response.status})`,
+            response.status,
+            attempt,
+            undefined,
+            billingAmbiguous
+          );
+        }
+        await response.body?.cancel().catch(() => undefined);
+      } else {
+        const text = await readTextBounded(response);
+        if (!response.ok) {
+          // Do not surface provider-controlled headers or bodies: compatible
+          // endpoints and proxies can reflect credentials into either one.
+          throw new ModelRequestError(
+            `model call failed (${response.status})`,
+            response.status,
+            attempt,
+            undefined,
+            billingAmbiguous
+          );
+        }
+        try {
+          return { data: jsonRecord(JSON.parse(text)), attempts: attempt, billingAmbiguous };
+        } catch {
+          throw new Error('model returned invalid JSON');
+        }
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new ModelRequestError('model call timed out', null, attempt, undefined, true);
+      }
+      if (error instanceof ModelRequestError) throw error;
+      throw new ModelRequestError(
+        error instanceof Error ? error.message : 'model request failed',
+        responseStatus,
+        attempt,
+        undefined,
+        billingAmbiguous || responseStatus === null || responseStatus === 200
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new Error('model call timed out');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+    if (retryIn !== null) await sleep(retryIn);
   }
+  throw new Error('model retry budget exhausted');
+}
+
+function modelUsage(
+  usage: Record<string, unknown>,
+  inputField: string,
+  outputField: string
+): { inputTokens: number; outputTokens: number; usageValid: boolean } {
+  const rawInput = usage[inputField];
+  const rawOutput = usage[outputField];
+  const inputValid =
+    typeof rawInput === 'number' && Number.isSafeInteger(rawInput) && rawInput >= 0;
+  const outputValid =
+    typeof rawOutput === 'number' && Number.isSafeInteger(rawOutput) && rawOutput >= 0;
+  const inputTokens = inputValid ? rawInput : 0;
+  const outputTokens = outputValid ? rawOutput : 0;
+  const usageValid = inputValid && outputValid && inputTokens + outputTokens > 0;
+  return {
+    inputTokens: usageValid ? inputTokens : 0,
+    outputTokens: usageValid ? outputTokens : 0,
+    usageValid,
+  };
 }
 
 async function callAnthropic(
@@ -234,33 +359,64 @@ async function callAnthropic(
   call: ModelCall,
   maxTokens: number
 ): Promise<ModelResult> {
-  const data = await fetchModelJson(`${trimBase(baseUrl)}/v1/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
+  const { data, attempts, billingAmbiguous } = await fetchModelJson(
+    `${trimBase(baseUrl)}/v1/messages`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        system: call.system,
+        messages: [{ role: 'user', content: call.prompt }],
+        ...reasoningParams('anthropic', model, effort),
+      }),
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system: call.system,
-      messages: [{ role: 'user', content: call.prompt }],
-      ...reasoningParams('anthropic', model, effort),
-    }),
-  });
-  if (data.stop_reason === 'refusal') throw new Error('model refused the request');
-  if (data.stop_reason === 'max_tokens') throw new Error('model output was truncated');
+    MODEL_TIMEOUT_MS,
+    call.retryTransientErrors ? MODEL_MAX_ATTEMPTS : 1
+  );
+  const usage = modelUsage(jsonRecord(data.usage), 'input_tokens', 'output_tokens');
+  if (data.stop_reason === 'refusal') {
+    throw new ModelRequestError(
+      'model refused the request',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
+  }
+  if (data.stop_reason === 'max_tokens') {
+    throw new ModelRequestError(
+      'model output was truncated',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
+  }
   const text = (Array.isArray(data.content) ? data.content : [])
     .map(jsonRecord)
     .filter((block) => block.type === 'text')
     .map((block) => (typeof block.text === 'string' ? block.text : ''))
     .join('');
-  const usage = jsonRecord(data.usage);
+  if (!text.trim()) {
+    throw new ModelRequestError(
+      'model returned no text output',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
+  }
   return {
     text,
-    inputTokens: Number(usage.input_tokens ?? 0),
-    outputTokens: Number(usage.output_tokens ?? 0),
+    ...usage,
+    attempts,
+    billingAmbiguous,
   };
 }
 
@@ -328,7 +484,7 @@ async function callOpenAiCompatible(
   maxTokens: number,
   timeoutMs: number
 ): Promise<ModelResult> {
-  const data = await fetchModelJson(
+  const { data, attempts, billingAmbiguous } = await fetchModelJson(
     `${trimBase(baseUrl)}/chat/completions`,
     {
       method: 'POST',
@@ -338,13 +494,27 @@ async function callOpenAiCompatible(
       },
       body: JSON.stringify(buildOpenAiRequestBody(provider, model, effort, call, maxTokens)),
     },
-    timeoutMs
+    timeoutMs,
+    call.retryTransientErrors ? MODEL_MAX_ATTEMPTS : 1
   );
-  const usage = jsonRecord(data.usage);
+  const usage = modelUsage(jsonRecord(data.usage), 'prompt_tokens', 'completion_tokens');
+  let text: string;
+  try {
+    text = extractOpenAiText(data);
+  } catch (error) {
+    throw new ModelRequestError(
+      error instanceof Error ? error.message : 'model response was unusable',
+      200,
+      attempts,
+      usage,
+      billingAmbiguous
+    );
+  }
   return {
-    text: extractOpenAiText(data),
-    inputTokens: Number(usage.prompt_tokens ?? 0),
-    outputTokens: Number(usage.completion_tokens ?? 0),
+    text,
+    ...usage,
+    attempts,
+    billingAmbiguous,
   };
 }
 
