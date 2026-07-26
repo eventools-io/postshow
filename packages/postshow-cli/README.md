@@ -9,19 +9,15 @@ MIT licensed. The CLI, the local runtime, and the MCP server are open source; th
 The CLI requires a provisioned Postshow workspace, API URL, and workspace access token. This repository does not include a standalone workspace control plane.
 
 ```sh
-git clone https://github.com/eventools-io/postshow.git
-cd postshow
-pnpm install
-pnpm --filter postshow build
-cd /absolute/path/to/your-product
-node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js init
+git clone https://github.com/eventools-io/postshow.git ~/postshow
+cd ~/postshow && pnpm install && pnpm --filter postshow build
+cd /path/to/your-product
+node ~/postshow/packages/postshow-cli/dist/index.js init
 ```
 
-Replace both placeholder paths for your machine. Run the final command from the product repository you want the wizard to inspect, not from the Postshow clone.
+The app's Settings page prints these same commands, so the clone lives at `~/postshow`. If you put it elsewhere, substitute that path everywhere `~/postshow` appears below. Run the final command from the product repository you want the wizard to inspect, not from the Postshow clone.
 
-After the first supported npm release, the shorter entry point will be `npx postshow init`. Until then, build the CLI from `main` as shown above.
-
-The command examples below use the future `postshow` binary name. In a source checkout, replace it with `node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js`.
+There is no published `postshow` binary yet. Every command below is written as `postshow …` for brevity; in a source checkout, run `node ~/postshow/packages/postshow-cli/dist/index.js …` instead. After the first supported npm release, `npx postshow init` becomes the shorter entry point.
 
 The wizard detects supported configuration in the working directory, verifies each connector and engine credential you choose before saving it, and configures your engine: your own API keys, local models through Ollama, or Postshow's hosted models on a paid plan.
 
@@ -67,13 +63,13 @@ Give your coding agent access to the workspace:
   "mcpServers": {
     "postshow": {
       "command": "node",
-      "args": ["/absolute/path/to/postshow/packages/postshow-cli/dist/index.js", "mcp"]
+      "args": ["/Users/you/postshow/packages/postshow-cli/dist/index.js", "mcp"]
     }
   }
 }
 ```
 
-After the npm release, `"command": "npx"` with `"args": ["-y", "postshow", "mcp"]` will be the shorter equivalent.
+MCP arguments are not shell-expanded, so this one place needs the expanded absolute path to your clone rather than `~/postshow`. After the npm release, `"command": "npx"` with `"args": ["-y", "postshow", "mcp"]` will be the shorter equivalent.
 
 Tools: `workspace-status`, `list-customer-incidents`, `get-customer-incident`, `list-inbox`, `review-action-in-web`, `skip-action`, `list-accounts`, `list-field-notes`, `list-jobs`, `list-runs`, `run-local-jobs`, `get-scratchpad`.
 

@@ -40,7 +40,13 @@ import { AccountDeletionSection } from '@/components/settings/AccountDeletionSec
 import { MemberManagementSection } from '@/components/settings/MemberManagementSection';
 import { LegalLinks } from '@/components/LegalLinks';
 import { fallbackProvider, providersForMode } from '@/lib/engineProviders';
-import { SOURCE_CLI_COMMAND, SOURCE_CLI_GUIDE } from '@/lib/cli';
+import { DesktopAgentSection } from '@/components/settings/DesktopAgentSection';
+import {
+  SOURCE_CLI_COMMAND,
+  SOURCE_CLI_GUIDE,
+  SOURCE_CLI_INSTALL,
+  workspaceApiUrl,
+} from '@/lib/cli';
 
 const MODES: { value: EngineSettings['mode']; label: string; blurb: string }[] = [
   {
@@ -683,26 +689,51 @@ function TokensSection({ workspaceId }: { workspaceId: string }) {
   }
 
   const active = (tokens ?? []).filter((t: ApiToken) => !t.revoked_at);
+  const apiUrl = workspaceApiUrl();
 
   return (
     <Section title="Access tokens">
       <div className="ps-card flex flex-col gap-3 p-5">
         <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
-          Tokens authenticate the CLI, the MCP server, and the desktop app. Until the first npm
-          release,{' '}
+          Tokens authenticate the CLI, the MCP server, and the desktop app. Setup asks for a token
+          and for the API URL below.
+        </p>
+        <div className="rounded-sm border border-night-4 bg-night-2 p-3">
+          <p className="m-0 mb-1 font-public-mono text-[10px] uppercase tracking-[0.12em] text-night-fg-3">
+            API URL
+          </p>
+          {apiUrl ? (
+            <code className="break-all font-public-mono text-[12px] text-night-fg">{apiUrl}</code>
+          ) : (
+            <p className="m-0 font-public-sans text-[12px] text-bad" role="alert">
+              This deployment has no API origin configured, so the CLI cannot be pointed at it.
+              Contact support before running setup.
+            </p>
+          )}
+        </div>
+        <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
+          The CLI is not on npm yet, so build it from source once. It needs git, Node 24, and pnpm.
+        </p>
+        <pre className="m-0 overflow-x-auto rounded-sm bg-night-2 p-3 font-public-mono text-[11px] leading-[1.6] text-night-fg">
+          {SOURCE_CLI_INSTALL}
+        </pre>
+        <p className="m-0 max-w-[62ch] font-public-sans text-[13px] leading-[1.55] text-night-fg-2">
+          Then run{' '}
+          <code className="break-all font-public-mono text-[12px] text-night-fg">
+            {SOURCE_CLI_COMMAND} init
+          </code>{' '}
+          in your product repository and paste the API URL and a token when asked. Cloning anywhere
+          other than <code className="font-public-mono text-[12px] text-night-fg">~/postshow</code>{' '}
+          changes that path in every command shown in the app. The{' '}
           <a
             href={SOURCE_CLI_GUIDE}
             className="font-medium text-night-fg underline"
             target="_blank"
             rel="noreferrer"
           >
-            build the CLI from GitHub
+            setup guide
           </a>{' '}
-          and run{' '}
-          <code className="break-all font-public-mono text-[12px] text-night-fg">
-            {SOURCE_CLI_COMMAND} init
-          </code>{' '}
-          in your product repository, then paste one when asked.
+          covers the rest.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -930,6 +961,8 @@ function WorkspaceSettingsPage() {
       ) : null}
 
       <TokensSection workspaceId={workspaceId} />
+
+      <DesktopAgentSection />
 
       <Section title="Workspace identity">
         <div className="ps-card flex flex-col gap-1 p-4 sm:p-5">
