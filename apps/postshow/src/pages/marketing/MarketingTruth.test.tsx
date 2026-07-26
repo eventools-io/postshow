@@ -20,8 +20,9 @@ describe('public product claims', () => {
       screen.getByRole('heading', { name: /turn customer friction into verified fixes/i })
     ).toBeInTheDocument();
     expect(document.body).toHaveTextContent(/exact evidence and affected accounts/i);
+    expect(document.body).toHaveTextContent(/linked sentry issues/i);
     expect(document.body).toHaveTextContent(
-      /exact code and error references, intervention execution, and measured outcomes are still being built/i
+      /exact github code references, intervention execution, and measured outcomes are still being built/i
     );
     expect(document.body).toHaveTextContent(/the recovery loop/i);
     expect(document.body).toHaveTextContent(/the incident contract/i);
@@ -37,6 +38,29 @@ describe('public product claims', () => {
     expect(document.body).not.toHaveTextContent(
       /free forever|every session|planned beta pricing|\bSSO\b/i
     );
+  });
+
+  it('describes the recovery check Postshow actually saves', () => {
+    renderPage(<LandingPage />);
+
+    // Every incident is materialized with the same contract: metric
+    // repeat_session_count, a session-count baseline, direction decrease, and a
+    // seven-day window. No cohort, threshold, or guardrail is stored anywhere,
+    // so the public pages may not promise one.
+    expect(document.body).toHaveTextContent(/metric, a baseline, a direction, and a window/i);
+    expect(document.body).not.toHaveTextContent(/cohort|threshold|guardrail/i);
+  });
+
+  it('presents the outcome vocabulary as a target rather than a reported result', () => {
+    renderPage(<LandingPage />);
+
+    // measured_outcome is JSONB defaulted to {"status":"pending"} and nothing
+    // in either repository writes it, so naming the five results is a promise
+    // about the recovery check, not a description of shipped behavior.
+    for (const outcome of ['recovered', 'improving', 'unchanged', 'regressed', 'inconclusive']) {
+      expect(screen.getByText(outcome)).toBeInTheDocument();
+    }
+    expect(document.body).toHaveTextContent(/postshow does not report an outcome yet/i);
   });
 
   it('makes the public truth contract and contribution path explicit', () => {

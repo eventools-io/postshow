@@ -306,9 +306,25 @@ export interface AccountIncidentLink {
   session_ids: string[];
 }
 
+/** One exact provider object cited by an incident. The row carries the
+ * provider-owned identifier and nothing the provider wrote: a Sentry issue
+ * title is authored by whoever threw the exception inside the customer's
+ * product, so storing it would make an injection payload durable and
+ * clickable. Display text is derived from the identifier at render time. */
+export interface IncidentReference {
+  id: string;
+  /** A table constraint pins these to `sentry` and `issue` today. The dossier
+   * still narrows on both before rendering, because widening that constraint
+   * to GitHub repository objects is a migration, not a client change. */
+  provider: string;
+  object_type: string;
+  sentry_issue_id: string;
+}
+
 export interface IncidentDossier {
   incident: CustomerIncident;
   accounts: IncidentAccount[];
+  references: IncidentReference[];
   fieldNotes: FieldNote[];
   inboxItems: InboxItem[];
 }
@@ -316,6 +332,10 @@ export interface IncidentDossier {
 export interface PosthogReplayConfig {
   origin: string;
   projectId: string;
+}
+
+export interface SentryIssueConfig {
+  orgSlug: string;
 }
 
 export type JobStatus = 'active' | 'paused' | 'proposed' | 'vetoed' | 'done';

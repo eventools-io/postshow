@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { invokePostshowFunction } from './functionClient';
 import { posthogReplayConfig } from './replay';
+import { sentryIssueConfig } from './sentryIssues';
 import { parseIncidentEvidenceLedger } from './incidentEvidence';
 import type {
   Workspace,
@@ -28,7 +29,9 @@ import type {
   CustomerIncident,
   IncidentDossier,
   IncidentAccount,
+  IncidentReference,
   PosthogReplayConfig,
+  SentryIssueConfig,
   AccountIncidentLink,
 } from './types';
 
@@ -217,35 +220,47 @@ export async function fetchIncidentDossier(
   workspaceId: string,
   incidentId: string
 ): Promise<IncidentDossier> {
-  const [{ data: incident, error: incidentError }, linksResult, notesResult, inboxResult] =
-    await Promise.all([
-      supabase
-        .from('postshow_customer_incidents')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .eq('id', incidentId)
-        .maybeSingle(),
-      supabase
-        .from('postshow_incident_accounts')
-        .select('workspace_id, incident_id, account_id, confidence, evidence')
-        .eq('workspace_id', workspaceId)
-        .eq('incident_id', incidentId),
-      supabase
-        .from('postshow_field_notes')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .eq('incident_id', incidentId)
-        .order('created_at', { ascending: false }),
-      supabase
-        .from('postshow_inbox_items')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .eq('incident_id', incidentId)
-        .order('created_at', { ascending: false }),
-    ]);
+  const [
+    { data: incident, error: incidentError },
+    linksResult,
+    referencesResult,
+    notesResult,
+    inboxResult,
+  ] = await Promise.all([
+    supabase
+      .from('postshow_customer_incidents')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('id', incidentId)
+      .maybeSingle(),
+    supabase
+      .from('postshow_incident_accounts')
+      .select('workspace_id, incident_id, account_id, confidence, evidence')
+      .eq('workspace_id', workspaceId)
+      .eq('incident_id', incidentId),
+    supabase
+      .from('postshow_incident_references')
+      .select('id, provider, object_type, sentry_issue_id')
+      .eq('workspace_id', workspaceId)
+      .eq('incident_id', incidentId)
+      .order('object_last_seen_at', { ascending: false }),
+    supabase
+      .from('postshow_field_notes')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('incident_id', incidentId)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('postshow_inbox_items')
+      .select('*')
+      .eq('workspace_id', workspaceId)
+      .eq('incident_id', incidentId)
+      .order('created_at', { ascending: false }),
+  ]);
   if (incidentError) throw new Error(incidentError.message);
   if (!incident) throw new Error('Incident not found.');
   if (linksResult.error) throw new Error(linksResult.error.message);
+  if (referencesResult.error) throw new Error(referencesResult.error.message);
   if (notesResult.error) throw new Error(notesResult.error.message);
   if (inboxResult.error) throw new Error(inboxResult.error.message);
 
@@ -268,6 +283,7 @@ export async function fetchIncidentDossier(
       const account = accountById.get(link.account_id);
       return account ? [{ ...link, account }] : [];
     }),
+    references: (referencesResult.data ?? []) as IncidentReference[],
     fieldNotes: (notesResult.data ?? []) as FieldNote[],
     inboxItems: (inboxResult.data ?? []) as InboxItem[],
   };
@@ -287,6 +303,22 @@ export async function fetchPosthogReplayConfig(
   const meta =
     data.meta && typeof data.meta === 'object' ? (data.meta as Record<string, unknown>) : {};
   return posthogReplayConfig(meta);
+}
+
+export async function fetchSentryIssueConfig(
+  workspaceId: string
+): Promise<SentryIssueConfig | null> {
+  const { data, error } = await supabase
+    .from('postshow_connections')
+    .select('meta, status')
+    .eq('workspace_id', workspaceId)
+    .eq('provider', 'sentry')
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data || data.status !== 'connected') return null;
+  const meta =
+    data.meta && typeof data.meta === 'object' ? (data.meta as Record<string, unknown>) : {};
+  return sentryIssueConfig(meta);
 }
 
 export async function draftTicketFromNote(noteId: string): Promise<void> {

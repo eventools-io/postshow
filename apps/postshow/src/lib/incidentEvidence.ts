@@ -1,3 +1,4 @@
+import { INCIDENT_EVIDENCE_POLICY_VERSION } from '@eventools/postshow-core';
 import type {
   IncidentEvidenceLedger,
   IncidentEvidenceRequirement,
@@ -29,6 +30,7 @@ const SOURCES = new Set(['posthog', 'stripe', 'sentry', 'github', 'postshow']);
 const REASON_CODES = new Set([
   'grounded_action_ready_for_review',
   'account_identity_not_grounded',
+  'technical_failure_not_linked',
   'complete_evidence_no_grounded_account',
   'no_intervention_cleared_threshold',
   'missing_behavior_evidence',
@@ -62,7 +64,7 @@ export function unavailableIncidentEvidenceLedger(): IncidentEvidenceLedger {
 export function parseIncidentEvidenceLedger(value: unknown): IncidentEvidenceLedger {
   const ledger = record(value);
   if (
-    ledger.policy_version !== 'incident-evidence-v1' ||
+    ledger.policy_version !== INCIDENT_EVIDENCE_POLICY_VERSION ||
     !['act', 'gather_more', 'abstain'].includes(String(ledger.decision)) ||
     !REASON_CODES.has(String(ledger.reason_code)) ||
     (ledger.evaluated_run_id !== null &&
@@ -121,7 +123,7 @@ export function parseIncidentEvidenceLedger(value: unknown): IncidentEvidenceLed
   }
 
   return {
-    policy_version: 'incident-evidence-v1',
+    policy_version: INCIDENT_EVIDENCE_POLICY_VERSION,
     evaluated_run_id: ledger.evaluated_run_id as string | null,
     decision: ledger.decision as IncidentEvidenceLedger['decision'],
     reason_code: String(ledger.reason_code),
