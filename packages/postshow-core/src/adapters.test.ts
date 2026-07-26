@@ -257,13 +257,24 @@ describe('bounded connector gathering', () => {
     const next =
       '<https://sentry.io/api/0/projects/acme/web/issues/?cursor=next>; rel="next"; results="true"';
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      json([{ id: '1', title: 'Boom', count: '3', permalink: 'https://sentry.io/issues/1' }], {
-        link: next,
-      })
+      json(
+        [
+          {
+            id: '1',
+            title: 'Boom',
+            count: '3',
+            permalink: 'https://sentry.io/issues/1',
+            firstSeen: '2026-07-20T00:00:00Z',
+            lastSeen: '2026-07-22T00:00:00Z',
+          },
+        ],
+        { link: next }
+      )
     );
     const result = await sentryGather(
       { org_slug: 'acme', project_slug: 'web' },
       { token: 'token' },
+      1,
       { maxPages: 1 }
     );
     expect(result.completeness).toMatchObject({ complete: false, returned: 1 });
@@ -275,8 +286,24 @@ describe('bounded connector gathering', () => {
       })
     );
     await expect(
-      sentryGather({ org_slug: 'acme', project_slug: 'web' }, { token: 'token' }, { maxPages: 1 })
+      sentryGather({ org_slug: 'acme', project_slug: 'web' }, { token: 'token' }, 1, {
+        maxPages: 1,
+      })
     ).rejects.toThrow('leave the configured endpoint');
+  });
+
+  it('refuses a Sentry gather that cannot state its collection window', async () => {
+    await expect(
+      sentryGather({ org_slug: 'acme', project_slug: 'web' }, { token: 'token' }, Number.NaN)
+    ).rejects.toThrow('finite number of days');
+  });
+
+  it('fails a Sentry page that is not a list of issues', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json({ detail: 'unexpected shape' }));
+
+    await expect(
+      sentryGather({ org_slug: 'acme', project_slug: 'web' }, { token: 'token' }, 1)
+    ).rejects.toThrow('non-array payload');
   });
 });
 

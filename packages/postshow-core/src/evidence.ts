@@ -1,6 +1,11 @@
 import type { GatherCompleteness } from './adapters';
 
-export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v1';
+/** v2 stopped treating the technical-failure requirement as permanently
+ * unlinkable: a validated Sentry reference now supports it, and an otherwise
+ * actionable incident with gathered Sentry and no linked reference holds at
+ * `gather_more`. A ledger written under v1 recorded a decision the current
+ * policy would not reach, so it is not readable as a v2 decision. */
+export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v2';
 export const SOURCE_EVIDENCE_CONTEXT_VERSION = 1 as const;
 
 export const INCIDENT_EVIDENCE_SOURCES = ['posthog', 'stripe', 'sentry', 'github'] as const;

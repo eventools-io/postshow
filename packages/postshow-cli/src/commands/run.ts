@@ -27,7 +27,7 @@ import {
   type ModelOutput,
   type OutcomeStats,
   type PosthogGather,
-  type SentryIssue,
+  type SentryGather,
   type StripeAccount,
   type TaskClass,
 } from '@eventools/postshow-core';
@@ -361,8 +361,11 @@ function assertVerifiedSource(config: CliConfig, dependencies: RunDependencies):
       (connector) => LOCAL_SOURCE_PROVIDERS.has(connector.provider) && connector.verified
     )
   ) {
+    // A connection configured in the browser stays in the workspace and is
+    // never readable here, so the refusal has to name the command that fixes
+    // it rather than restate the state the operator is already stuck in.
     throw new Error(
-      'local runs require at least one verified PostHog, Stripe, Sentry, GitHub, or Postgres connector'
+      'run `postshow init` on this machine to enter a PostHog, Stripe, Sentry, GitHub, or Postgres credential; local runs gather from this device and a workspace connection never supplies one'
     );
   }
 }
@@ -513,7 +516,7 @@ export async function executeLocalJob(
     const windowDays = job.kind === 'deep_dive' ? 7 : 1;
     let posthog: PosthogGather | null = null;
     let stripe: GatherResult<StripeAccount[]> | null = null;
-    let sentry: GatherResult<SentryIssue[]> | null = null;
+    let sentry: SentryGather | null = null;
     let github: GatherResult<GithubPr[]> | null = null;
     let postgresSnapshot: PostgresSnapshot | null = null;
     let sessionsWatched = 0;
@@ -547,7 +550,7 @@ export async function executeLocalJob(
       gatherers.push({
         provider: 'sentry',
         gather: async () => {
-          sentry = await dependencies.sentryGather(se.meta, se.secret);
+          sentry = await dependencies.sentryGather(se.meta, se.secret, windowDays);
           dependencies.dim(`  sentry: ${sentry.data.length} issues`);
           warnIncompleteGather('sentry', sentry.completeness, dependencies);
         },
@@ -647,7 +650,7 @@ export async function executeLocalJob(
     // repeats this sanitization as defense in depth.
     const gatheredPosthog = posthog as PosthogGather | null;
     const gatheredStripe = stripe as GatherResult<StripeAccount[]> | null;
-    const gatheredSentry = sentry as GatherResult<SentryIssue[]> | null;
+    const gatheredSentry = sentry as SentryGather | null;
     const gatheredGithub = github as GatherResult<GithubPr[]> | null;
     const sourceAccounts = stripeSourceAccounts(gatheredStripe);
     const identityContext = sourceIdentityContext(gatheredPosthog, gatheredStripe);
@@ -660,6 +663,7 @@ export async function executeLocalJob(
     const output = sanitizeModelOutput(dependencies.parseModelJson(result.text), {
       allowedSessionIds: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
       allowedAccountIdentityKeys: sourceAccounts.map((account) => account.identityKey),
+      allowedSentryIssueIds: gatheredSentry?.data.map((issue) => issue.id) ?? [],
       sessionAccountIdentityKeys: identityContext.sessions.map(
         (session) => [session.sessionId, session.accountIdentityKey] as const
       ),
@@ -683,6 +687,24 @@ export async function executeLocalJob(
         source_session_ids: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
         identity_context: identityContext,
         evidence_context: evidenceContext,
+        // The set of Sentry issues this run actually collected, with the
+        // connection and window that produced it. Without it the workspace has
+        // nothing to revalidate a cited `sentry_issue_id` against and has to
+        // trust this machine. Only the provider identifier and the timestamps
+        // that place it inside the window travel; issue titles and permalinks
+        // are provider-authored text and stay on this device.
+        sentry_source:
+          gatheredSentry && se
+            ? {
+                orgSlug: String(se.meta.org_slug ?? ''),
+                projectSlug: String(se.meta.project_slug ?? ''),
+                window: gatheredSentry.window,
+                issues: gatheredSentry.data.map((issue) => ({
+                  id: issue.id,
+                  lastSeen: issue.lastSeen,
+                })),
+              }
+            : null,
         engine: engineLabel,
         sessions_watched: sessionsWatched,
         usage: {

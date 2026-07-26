@@ -2,6 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig } from '../config';
 import { WorkerBusyError } from '../worker';
 import {
+  CONNECTOR_PLANS,
+  connectorSetupState,
+  setupConnector,
+  type ConnectorSetupDependencies,
+} from './init';
+import {
   executeLocalJob,
   LEASE_HEARTBEAT_MS,
   MAX_LOCAL_JOBS_PER_RUN,
@@ -107,6 +113,11 @@ function harness(initialJobs: GatewayJob[] = [job(1)]) {
     })),
     sentryGather: vi.fn(async () => ({
       data: [],
+      window: {
+        days: 1,
+        since: '2026-07-21T00:00:00.000Z',
+        until: '2026-07-22T00:00:00.000Z',
+      },
       completeness: { complete: true, sampled: false, returned: 0, available: 0 },
     })),
     githubGather: vi.fn(async () => ({
@@ -434,6 +445,97 @@ describe('executeLocalJob', () => {
     expect(serializedSubmit).not.toContain('acct_1');
   });
 
+  it('commits the source-owned Sentry set without uploading provider-authored text', async () => {
+    const test = harness();
+    test.config.connectors.push({
+      provider: 'sentry',
+      label: 'Sentry',
+      localOnly: true,
+      verified: true,
+      meta: { org_slug: 'acme', project_slug: 'checkout' },
+      secret: { token: 'sntrys_test' },
+    });
+    test.dependencies.sentryGather = vi.fn(async () => ({
+      data: [
+        {
+          id: '4815162342',
+          title: 'TypeError at /checkout',
+          count: 12,
+          permalink: 'https://acme.sentry.io/issues/4815162342/',
+          firstSeen: '2026-07-21T01:00:00.000Z',
+          lastSeen: '2026-07-21T18:00:00.000Z',
+        },
+      ],
+      window: {
+        days: 1,
+        since: '2026-07-21T00:00:00.000Z',
+        until: '2026-07-22T00:00:00.000Z',
+      },
+      completeness: { complete: true, sampled: false, returned: 1, available: 1 },
+    }));
+    test.dependencies.parseModelJson = vi.fn(() => ({
+      field_notes: [
+        {
+          title: 'Checkout throws on retry',
+          fingerprint: 'checkout-retry-throw',
+          sentry_issue_ids: ['4815162342', '9999999999'],
+        },
+      ],
+    }));
+
+    await expect(executeLocalJob(test.config, job(1), test.dependencies)).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+
+    const submit = test.gatewayCalls.find(
+      (call) => call.op === 'runs.submit' && call.args.status === 'ok'
+    );
+    expect(submit?.args.sentry_source).toEqual({
+      orgSlug: 'acme',
+      projectSlug: 'checkout',
+      window: {
+        days: 1,
+        since: '2026-07-21T00:00:00.000Z',
+        until: '2026-07-22T00:00:00.000Z',
+      },
+      issues: [{ id: '4815162342', lastSeen: '2026-07-21T18:00:00.000Z' }],
+    });
+    expect(submit?.args.evidence_context).toMatchObject({
+      sources: { sentry: { state: 'complete', returned: 1, available: 1 } },
+    });
+    const serializedSubmit = JSON.stringify(submit?.args);
+    expect(serializedSubmit).not.toContain('TypeError');
+    expect(serializedSubmit).not.toContain('sentry.io/issues');
+    expect(serializedSubmit).not.toContain('9999999999');
+  });
+
+  it('omits the Sentry reference set when the gather fails', async () => {
+    const test = harness();
+    test.config.connectors.push({
+      provider: 'sentry',
+      label: 'Sentry',
+      localOnly: true,
+      verified: true,
+      meta: { org_slug: 'acme', project_slug: 'checkout' },
+      secret: { token: 'sntrys_test' },
+    });
+    test.dependencies.sentryGather = vi.fn(async () => {
+      throw new Error('sentry unavailable');
+    });
+
+    await expect(executeLocalJob(test.config, job(1), test.dependencies)).resolves.toMatchObject({
+      status: 'succeeded',
+    });
+
+    const submit = test.gatewayCalls.find(
+      (call) => call.op === 'runs.submit' && call.args.status === 'ok'
+    );
+    expect(submit?.args.sentry_source).toBeNull();
+    expect(submit?.args.evidence_context).toMatchObject({
+      sources: { sentry: { state: 'failed', returned: 0, available: null } },
+    });
+  });
+
   it('fails in gather only when every verified source fails', async () => {
     const test = harness();
     test.dependencies.stripeGather = vi.fn(async () => {
@@ -717,6 +819,63 @@ describe('runOnceDetailed outcomes', () => {
       throw new Error('model unavailable');
     });
     await expect(runOnce(undefined, test.dependencies)).resolves.toBe(1);
+  });
+});
+
+describe('browser-first onboarding', () => {
+  function initDependencies(): ConnectorSetupDependencies {
+    return {
+      ask: vi.fn(async () => 'project-1'),
+      askSecret: vi.fn(async () => 'phx_test'),
+      confirm: vi.fn(async () => true),
+      dim: vi.fn(),
+      fail: vi.fn(),
+      gateway: vi.fn(async (_config, op) => {
+        if (op === 'connections.upsert') return { connection_id: 'connection-1' };
+        if (op === 'connections.list') {
+          return { connections: [{ provider: 'posthog', status: 'connected', local_only: true }] };
+        }
+        return { ok: true };
+      }),
+      heading: vi.fn(),
+      ok: vi.fn(),
+      say: vi.fn(),
+      warn: vi.fn(),
+      saveConfig: vi.fn(),
+    };
+  }
+
+  it('refuses by naming init, then accepts the credential that init collects', async () => {
+    const test = harness([job(1), job(2)]);
+    test.config.connectors = [];
+    const workspaceConnections = [{ provider: 'posthog', status: 'connected', local_only: false }];
+    const plan = CONNECTOR_PLANS.find((candidate) => candidate.provider === 'posthog');
+    expect(plan).toBeDefined();
+    if (!plan) throw new Error('PostHog connector plan is missing');
+
+    const stranded = await executeLocalJob(test.config, job(1), test.dependencies);
+
+    expect(stranded).toMatchObject({ status: 'failed', phase: 'preflight' });
+    expect(stranded.detail).toContain('run `postshow init`');
+    expect(test.dependencies.posthogGather).not.toHaveBeenCalled();
+    expect(connectorSetupState(plan, workspaceConnections, test.config.connectors)).toBe(
+      'device-credential-missing'
+    );
+
+    await setupConnector(
+      test.config,
+      { ...plan, test: vi.fn(async () => ({ ok: true, detail: 'verified' })) },
+      '',
+      initDependencies()
+    );
+
+    expect(connectorSetupState(plan, workspaceConnections, test.config.connectors)).toBe(
+      'satisfied'
+    );
+    const recovered = await executeLocalJob(test.config, job(2), test.dependencies);
+
+    expect(recovered).toMatchObject({ status: 'succeeded', phase: 'complete' });
+    expect(test.dependencies.posthogGather).toHaveBeenCalledOnce();
   });
 });
 

@@ -5,7 +5,7 @@
 // stays in the edge runtime.
 
 import { isUnsafePublicHostname } from './network';
-import { canonicalSessionId } from './sanitize';
+import { canonicalSentryIssueId, canonicalSessionId } from './sanitize';
 
 export const ADAPTER_TIMEOUT_MS = 20_000;
 const MAX_ADAPTER_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -765,12 +765,79 @@ export async function slackDigest(secret: Record<string, unknown>, text: string)
 }
 
 export interface SentryIssue {
+  /** Provider-owned stable identifier. The only value a finding may cite. */
+  id: string;
   title: string;
   count: number;
   permalink: string;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+/** The exact `lastSeen` range one run asked Sentry for. It travels with the
+ * issues because an issue list without its window cannot be validated: a later
+ * reference is only evidence if it falls inside the collection that produced
+ * it. */
+export interface SentryCollectionWindow {
+  days: number;
+  since: string;
+  until: string;
+}
+
+export interface SentryGather extends GatherResult<SentryIssue[]> {
+  window: SentryCollectionWindow;
 }
 
 const SENTRY_ISSUE_PAGE_CAP = 5;
+const SENTRY_TEXT_MAX = 200;
+// deno-lint-ignore no-control-regex -- the C0 range and DEL are exactly what this class strips
+const SENTRY_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+const SENTRY_EMAIL = /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g;
+const SENTRY_QUERY_STRING = /\?[^\s]*=[^\s]*/g;
+const SENTRY_HOME_DIRECTORY = /((?:[A-Za-z]:)?[\\/](?:Users|home))([\\/])[^\\/\s]+/g;
+const SENTRY_OPAQUE_TOKEN = /[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z0-9_-]{32,}|\d{6,}/gi;
+
+/** The `privacySafeUrl` treatment for provider-authored free text. Sentry issue
+ * titles are written by whoever threw the exception inside the customer's
+ * product, and they routinely carry breadcrumb emails, developer home
+ * directories, query strings, and bearer tokens. Redaction happens here, at the
+ * connector boundary, so nothing unredacted can reach a packet or a model. */
+export function privacySafeSentryText(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(SENTRY_CONTROL_CHARACTERS, ' ')
+    .replace(SENTRY_EMAIL, ':email')
+    .replace(SENTRY_QUERY_STRING, '?:redacted')
+    .replace(SENTRY_HOME_DIRECTORY, '$1$2:user')
+    .replace(SENTRY_OPAQUE_TOKEN, ':id')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, SENTRY_TEXT_MAX);
+}
+
+/** A permalink is a rendered link, never the reference itself, so an unusable
+ * one costs the issue its deep link and nothing else. */
+function sentryPermalink(raw: unknown): string {
+  let url: URL;
+  try {
+    url = new URL(String(raw ?? ''));
+  } catch {
+    return '';
+  }
+  if (url.protocol !== 'https:') return '';
+  if (url.hostname !== 'sentry.io' && !url.hostname.endsWith('.sentry.io')) return '';
+  return url.toString().slice(0, 500);
+}
+
+function sentryTimestamp(raw: unknown): string {
+  const parsed = Date.parse(String(raw ?? ''));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : '';
+}
+
+function sentryObject(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
 
 function sentryNextCursor(linkHeader: string | null, expectedPath: string): string | null {
   if (!linkHeader) return null;
@@ -808,34 +875,45 @@ export async function sentryTest(
   return { ok: true, detail: `access to ${org} confirmed` };
 }
 
-export async function sentryIssues(
-  meta: Record<string, unknown>,
-  secret: Record<string, unknown>
-): Promise<SentryIssue[]> {
-  return (await sentryGather(meta, secret)).data;
-}
-
 export async function sentryGather(
   meta: Record<string, unknown>,
   secret: Record<string, unknown>,
+  windowDays: number,
   options: GatherPageOptions = {}
-): Promise<GatherResult<SentryIssue[]>> {
+): Promise<SentryGather> {
   const org = String(meta.org_slug || '');
   const project = String(meta.project_slug || '');
   const token = String(secret.token || '');
   if (!/^[A-Za-z0-9_-]+$/.test(org) || !/^[A-Za-z0-9_-]+$/.test(project)) {
     throw new Error('invalid Sentry organization or project slug');
   }
+  // The window is provenance, not a display detail, so an unusable one is an
+  // error rather than a silently degraded range.
+  if (!Number.isFinite(windowDays)) {
+    throw new Error('sentry collection window must be a finite number of days');
+  }
+  const days = Math.min(30, Math.max(1, Math.round(windowDays)));
+  const until = Date.now();
+  const window: SentryCollectionWindow = {
+    days,
+    since: new Date(until - days * 86400_000).toISOString(),
+    until: new Date(until).toISOString(),
+  };
   const expectedPath = `/api/0/projects/${org}/${project}/issues/`;
   const maxPages = pageLimit(options.maxPages, SENTRY_ISSUE_PAGE_CAP);
   const issues: SentryIssue[] = [];
-  const seen = new Set<string>();
+  const seenIssueIds = new Set<string>();
+  const seenCursors = new Set<string>();
+  let uncitableRows = 0;
   let cursor: string | null = null;
-  let complete = false;
+  let reachedEnd = false;
   for (let page = 0; page < maxPages; page += 1) {
     const url = new URL(`https://sentry.io${expectedPath}`);
-    url.searchParams.set('query', 'is:unresolved');
-    url.searchParams.set('statsPeriod', '24h');
+    // On this endpoint `statsPeriod` picks the response graph rather than the
+    // filter, so the collection window is the structured `lastSeen` query and
+    // the graph is switched off instead of paid for and discarded.
+    url.searchParams.set('query', `is:unresolved lastSeen:-${days}d`);
+    url.searchParams.set('statsPeriod', '');
     url.searchParams.set('sort', 'freq');
     url.searchParams.set('per_page', '100');
     if (cursor) url.searchParams.set('cursor', cursor);
@@ -843,37 +921,52 @@ export async function sentryGather(
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!response.ok) throw new Error(`sentry issues failed (${response.status})`);
-    const rows = (await response.json()) as {
-      id?: string;
-      title: string;
-      count: string;
-      permalink: string;
-    }[];
-    for (const issue of rows) {
-      const identity = String(issue.id || issue.permalink || `${issue.title}:${issue.count}`);
-      if (seen.has(identity)) continue;
-      seen.add(identity);
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error('sentry issues returned a non-array payload');
+    for (const raw of payload) {
+      const row = sentryObject(raw);
+      const id = canonicalSentryIssueId(row.id);
+      const firstSeen = sentryTimestamp(row.firstSeen);
+      const lastSeen = sentryTimestamp(row.lastSeen);
+      // An issue that cannot be named or placed in time can never become a
+      // reference, so it is dropped and counted rather than padding the packet.
+      if (!id || !firstSeen || !lastSeen) {
+        uncitableRows += 1;
+        continue;
+      }
+      if (seenIssueIds.has(id)) continue;
+      seenIssueIds.add(id);
+      const count = Number(row.count ?? 0);
       issues.push({
-        title: String(issue.title ?? ''),
-        count: Number(issue.count ?? 0),
-        permalink: String(issue.permalink ?? ''),
+        id,
+        title: privacySafeSentryText(row.title),
+        count: Number.isFinite(count) ? Math.max(0, Math.round(count)) : 0,
+        permalink: sentryPermalink(row.permalink),
+        firstSeen,
+        lastSeen,
       });
     }
     const nextCursor = sentryNextCursor(response.headers.get('link'), expectedPath);
     if (!nextCursor) {
-      complete = true;
+      reachedEnd = true;
       break;
     }
-    if (seen.has(`cursor:${nextCursor}`)) throw new Error('sentry pagination cursor repeated');
-    seen.add(`cursor:${nextCursor}`);
+    if (seenCursors.has(nextCursor)) throw new Error('sentry pagination cursor repeated');
+    seenCursors.add(nextCursor);
     cursor = nextCursor;
+  }
+  const reasons: string[] = [];
+  if (!reachedEnd) {
+    reasons.push(`unresolved issue history exceeded the ${maxPages * 100}-record safety cap`);
+  }
+  if (uncitableRows > 0) {
+    reasons.push(`${uncitableRows} issue row(s) had no usable provider identifier or timestamps`);
   }
   return {
     data: issues,
-    completeness: completeness(complete, issues.length, {
-      reason: complete
-        ? undefined
-        : `unresolved issue history exceeded the ${maxPages * 100}-record safety cap`,
+    window,
+    completeness: completeness(reasons.length === 0, issues.length, {
+      reason: reasons.length === 0 ? undefined : reasons.join('; '),
     }),
   };
 }
@@ -902,7 +995,9 @@ function completenessSummary(source: string, value: GatherCompleteness, presente
 export function packetSections(input: {
   posthog: PosthogGather | null;
   stripe: ArrayGatherInput<StripeAccount>;
-  sentry: ArrayGatherInput<SentryIssue>;
+  /** Sentry has no data-only form: without its collection window an issue list
+   * cannot be labeled honestly or validated later. */
+  sentry: SentryGather | null;
   github: ArrayGatherInput<GithubPr>;
 }): string[] {
   const sections: string[] = [];
@@ -939,12 +1034,19 @@ export function packetSections(input: {
       }`
     );
   }
-  const sentry = normalizeArrayGather(input.sentry);
+  const sentry = input.sentry;
   if (sentry) {
     const presented = sentry.data.slice(0, 50);
     sections.push(
       completenessSummary('sentry unresolved issues', sentry.completeness, presented.length),
-      `ERRORS (sentry, 24h, unresolved):\n${presented.map((i) => `  ${i.count}× ${i.title}`).join('\n') || '  none'}`
+      `ERRORS (sentry, unresolved, last seen inside the ${sentry.window.days}d collection window ${sentry.window.since} to ${sentry.window.until}):\n${
+        presented
+          .map(
+            (issue) =>
+              `  [sentry_issue_id=${issue.id}] ${issue.count}× ${issue.title} · first seen ${issue.firstSeen} · last seen ${issue.lastSeen}`
+          )
+          .join('\n') || '  none'
+      }`
     );
   }
   const github = normalizeArrayGather(input.github);
