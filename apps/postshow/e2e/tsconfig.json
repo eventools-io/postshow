@@ -1,0 +1,16 @@
+{
+  // Extends the shared base by path rather than by package specifier: the
+  // Playwright config loader cannot follow the `exports` subpath the app's own
+  // tsconfig uses, and it reads this file to run the suite.
+  "extends": "../../../packages/config/tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"],
+    "baseUrl": "..",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["**/*.ts", "../playwright.config.ts"]
+}
