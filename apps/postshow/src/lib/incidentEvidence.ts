@@ -31,6 +31,7 @@ const REASON_CODES = new Set([
   'grounded_action_ready_for_review',
   'account_identity_not_grounded',
   'technical_failure_not_linked',
+  'code_context_not_linked',
   'complete_evidence_no_grounded_account',
   'no_intervention_cleared_threshold',
   'missing_behavior_evidence',

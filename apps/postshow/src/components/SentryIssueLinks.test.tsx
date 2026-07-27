@@ -12,6 +12,8 @@ function reference(sentry_issue_id: string): IncidentReference {
     provider: 'sentry',
     object_type: 'issue',
     sentry_issue_id,
+    github_repo: null,
+    github_object_id: null,
   };
 }
 

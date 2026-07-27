@@ -240,7 +240,7 @@ export async function fetchIncidentDossier(
       .eq('incident_id', incidentId),
     supabase
       .from('postshow_incident_references')
-      .select('id, provider, object_type, sentry_issue_id')
+      .select('id, provider, object_type, sentry_issue_id, github_repo, github_object_id')
       .eq('workspace_id', workspaceId)
       .eq('incident_id', incidentId)
       .order('object_last_seen_at', { ascending: false }),

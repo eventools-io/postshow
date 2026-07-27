@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ReplayLinks } from '@/components/ReplayLinks';
+import { GithubObjectLinks } from '@/components/GithubObjectLinks';
 import { SentryIssueLinks } from '@/components/SentryIssueLinks';
 import { ErrorRow, LoadingRow, Section } from '@/components/page';
 import { fetchIncidentDossier, fetchPosthogReplayConfig, fetchSentryIssueConfig } from '@/lib/api';
@@ -29,7 +30,7 @@ const GAP_LABELS: Record<string, string> = {
   account_identity_not_grounded: 'No affected account is grounded to this incident yet.',
   technical_failure_not_linked: 'No Sentry issue is linked to this incident yet.',
   code_context_not_linked:
-    'No GitHub code reference is linked. Postshow does not attach repository objects to incidents yet, so this gap stays open on every incident.',
+    'No GitHub pull request, commit, or issue is linked to this incident yet.',
   recovery_check_missing: 'The recovery check is not measurable yet.',
   behavior_evidence_missing: 'No source-grounded behavior evidence remains attached.',
   evidence_not_evaluated: 'The evidence decision is unavailable for this incident.',
@@ -83,6 +84,7 @@ export function IncidentPage() {
   const sentryReferences = references.filter(
     (reference) => reference.provider === 'sentry' && reference.object_type === 'issue'
   );
+  const githubReferences = references.filter((reference) => reference.provider === 'github');
   const sessionIds = incident.evidence_refs.session_ids ?? [];
   const coverage = incident.evidence_refs.source_coverage ?? {};
   const coverageReasons = coverage.reasons ?? [];
@@ -163,6 +165,11 @@ export function IncidentPage() {
                         Reconnect Sentry to open these issues.
                       </p>
                     ) : null}
+                  </div>
+                ) : null}
+                {requirement.key === 'code_context' && githubReferences.length > 0 ? (
+                  <div className="mt-2">
+                    <GithubObjectLinks references={githubReferences} />
                   </div>
                 ) : null}
               </li>

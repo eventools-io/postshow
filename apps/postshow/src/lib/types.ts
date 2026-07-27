@@ -313,12 +313,14 @@ export interface AccountIncidentLink {
  * clickable. Display text is derived from the identifier at render time. */
 export interface IncidentReference {
   id: string;
-  /** A table constraint pins these to `sentry` and `issue` today. The dossier
-   * still narrows on both before rendering, because widening that constraint
-   * to GitHub repository objects is a migration, not a client change. */
+  /** A table constraint allows `sentry`/`issue` and GitHub pull requests,
+   * commits, and issues. Exactly one provider shape is populated per row, so
+   * the dossier narrows on `provider` before reading either identifier. */
   provider: string;
   object_type: string;
-  sentry_issue_id: string;
+  sentry_issue_id: string | null;
+  github_repo: string | null;
+  github_object_id: string | null;
 }
 
 export interface IncidentDossier {

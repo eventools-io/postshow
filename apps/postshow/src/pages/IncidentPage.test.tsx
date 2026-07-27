@@ -121,15 +121,39 @@ function dossierWithLinkedIssue(): IncidentDossier {
         provider: 'sentry',
         object_type: 'issue',
         sentry_issue_id: '6042118',
+        github_repo: null,
+        github_object_id: null,
       },
-      // The reference table is meant to grow past Sentry. A row for another
-      // provider must not become a sentry.io link just because it carries a
-      // numeric identifier in the same column.
+    ],
+  };
+}
+
+function dossierWithLinkedCodeContext(): IncidentDossier {
+  const base = dossierWithLinkedIssue();
+  const ledger = base.incident.evidence_ledger;
+  return {
+    ...base,
+    incident: {
+      ...base.incident,
+      evidence_ledger: {
+        ...ledger,
+        requirements: ledger.requirements.map((requirement) =>
+          requirement.key === 'code_context'
+            ? { ...requirement, status: 'supported' as const, evidence_count: 1 }
+            : requirement
+        ),
+        gaps: [],
+      },
+    },
+    references: [
+      ...base.references,
       {
         id: '73000000-0000-4000-8000-000000000002',
         provider: 'github',
         object_type: 'pull_request',
-        sentry_issue_id: '99',
+        sentry_issue_id: null,
+        github_repo: 'northwind-labs/invoice-web',
+        github_object_id: '812',
       },
     ],
   };
@@ -160,7 +184,9 @@ describe('IncidentPage evidence decision', () => {
     expect(screen.getByText(/does not execute the intervention/i)).toBeInTheDocument();
     expect(screen.getByText('Technical failure evidence')).toBeInTheDocument();
     expect(screen.getByText(/no sentry issue is linked/i)).toBeInTheDocument();
-    expect(screen.getByText(/no github code reference is linked/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/no github pull request, commit, or issue is linked/i)
+    ).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /issue/i })).not.toBeInTheDocument();
   });
 
@@ -174,7 +200,22 @@ describe('IncidentPage evidence decision', () => {
     expect(link.closest('li')?.textContent).toContain('Technical failure evidence');
     expect(screen.getAllByRole('link', { name: /^issue/ })).toHaveLength(1);
     expect(screen.queryByText(/no sentry issue is linked/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/no github code reference is linked/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/no github pull request, commit, or issue is linked/i)
+    ).toBeInTheDocument();
+  });
+
+  it('cites each linked repository object beside the code-context requirement', async () => {
+    fetchDossier.mockResolvedValue(dossierWithLinkedCodeContext());
+    fetchSentry.mockResolvedValue({ orgSlug: 'acme' });
+    renderPage();
+
+    const link = await screen.findByRole('link', { name: 'pull #812 ↗' });
+    expect(link).toHaveAttribute('href', 'https://github.com/northwind-labs/invoice-web/pull/812');
+    expect(link.closest('li')?.textContent).toContain('Code context');
+    expect(
+      screen.queryByText(/no github pull request, commit, or issue is linked/i)
+    ).not.toBeInTheDocument();
   });
 
   it('says why a linked issue has no deep link when the Sentry connection is gone', async () => {
