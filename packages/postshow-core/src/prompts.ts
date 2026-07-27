@@ -14,6 +14,7 @@ export interface ModelOutput {
     session_ids?: string[];
     account_identity_keys?: string[];
     sentry_issue_ids?: string[];
+    github_object_refs?: string[];
     root_cause_hypothesis?: string;
     severity?: string;
     fingerprint?: string;
@@ -30,6 +31,7 @@ export interface ModelOutput {
     session_ids?: string[];
     account_identity_keys?: string[];
     sentry_issue_ids?: string[];
+    github_object_refs?: string[];
     fingerprint?: string;
     incident_fingerprint?: string;
   }[];
@@ -59,6 +61,7 @@ export const OUTPUT_LIMITS = {
   sessionIds: 20,
   accountIdentityKeys: 20,
   sentryIssueIds: 10,
+  githubObjectRefs: 10,
   ruleChars: 300,
   summaryChars: 600,
 } as const;
@@ -84,10 +87,10 @@ export const STATUS_TONES = new Set(['good', 'warn', 'bad']);
 const OUTPUT_CONTRACT = [
   'Return ONLY a JSON object with these keys:',
   '- summary: string, 2 sentences max, plain language, outcome first.',
-  '- field_notes: array of {title, detail, sessions, session_ids, account_identity_keys, sentry_issue_ids, root_cause_hypothesis, severity, fingerprint}.',
+  '- field_notes: array of {title, detail, sessions, session_ids, account_identity_keys, sentry_issue_ids, github_object_refs, root_cause_hypothesis, severity, fingerprint}.',
   `  At most ${OUTPUT_LIMITS.fieldNotes}, ranked by sessions affected. severity is high|medium|low.`,
   '- inbox_items: array of {kind, meta, title, body, evidence, action_type,',
-  '  action_config, account_name, session_ids, account_identity_keys, sentry_issue_ids, fingerprint, incident_fingerprint}. kind is one of',
+  '  action_config, account_name, session_ids, account_identity_keys, sentry_issue_ids, github_object_refs, fingerprint, incident_fingerprint}. kind is one of',
   '  outreach|ticket|save_play|expansion|activation|other. action_type is one',
   '  of email|github_issue|linear_issue|none; email may include action_config',
   `  {subject}. Never choose a recipient or external destination; a human binds that during approval. At most ${OUTPUT_LIMITS.inboxItems}, and only when clearly worth a human action.`,
