@@ -115,7 +115,9 @@ export const GITHUB_FIXTURES: ConnectorFixtures = {
             number: 812,
             title: 'the issues endpoint echoes pull requests',
             updated_at: '2026-07-22T09:05:00Z',
-            pull_request: { url: 'https://api.github.com/repos/northwind-labs/invoice-web/pulls/812' },
+            pull_request: {
+              url: 'https://api.github.com/repos/northwind-labs/invoice-web/pulls/812',
+            },
           },
           { number: 0, title: 'zero is not an object number', updated_at: '2026-07-22T09:05:00Z' },
         ],

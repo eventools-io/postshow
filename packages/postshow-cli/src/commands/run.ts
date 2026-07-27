@@ -562,7 +562,9 @@ export async function executeLocalJob(
         provider: 'github',
         gather: async () => {
           github = await dependencies.githubGather(gh.meta, gh.secret, windowDays);
-          dependencies.dim(`  github: ${github.data.length} merged PRs, ${github.objects.length} citable objects`);
+          dependencies.dim(
+            `  github: ${github.data.length} merged PRs, ${github.objects.length} citable objects`
+          );
           warnIncompleteGather('github', github.completeness, dependencies);
         },
       });

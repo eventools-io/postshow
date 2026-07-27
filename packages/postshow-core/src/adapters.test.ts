@@ -269,7 +269,9 @@ describe('bounded connector gathering', () => {
       .mockResolvedValueOnce(
         json([{ sha, commit: { message: 'Fix invoice totals', committer: { date: committedAt } } }])
       )
-      .mockResolvedValueOnce(json([{ number: 7, title: 'Totals are wrong', updated_at: issueUpdatedAt }]));
+      .mockResolvedValueOnce(
+        json([{ number: 7, title: 'Totals are wrong', updated_at: issueUpdatedAt }])
+      );
 
     const result = await githubGather(
       { repo: 'eventools-io/postshow' },

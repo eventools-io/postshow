@@ -84,9 +84,7 @@ describe('github connector fixtures', () => {
       'commit:4f21ac9e0b7d3c5182ff60a4b9e8d7c3a1526079',
       'issue:796',
     ]);
-    expect(result.objects[0]?.url).toBe(
-      `https://github.com/${GITHUB_FIXTURE_META.repo}/pull/812`
-    );
+    expect(result.objects[0]?.url).toBe(`https://github.com/${GITHUB_FIXTURE_META.repo}/pull/812`);
     expect(result.objects[1]?.url).toBe(
       `https://github.com/${GITHUB_FIXTURE_META.repo}/commit/4f21ac9e0b7d3c5182ff60a4b9e8d7c3a1526079`
     );
