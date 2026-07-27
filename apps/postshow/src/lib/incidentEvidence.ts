@@ -27,11 +27,12 @@ const SOURCE_STATES = new Set<IncidentEvidenceSourceState>([
   'not_gathered',
 ]);
 const SOURCES = new Set(['posthog', 'stripe', 'sentry', 'github', 'postshow']);
+// `code_context_not_linked` is a gap but never a reason: since v4 code context
+// reports what is missing without deciding anything.
 const REASON_CODES = new Set([
   'grounded_action_ready_for_review',
   'account_identity_not_grounded',
   'technical_failure_not_linked',
-  'code_context_not_linked',
   'complete_evidence_no_grounded_account',
   'no_intervention_cleared_threshold',
   'missing_behavior_evidence',

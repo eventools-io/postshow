@@ -6,12 +6,17 @@ import type { GatherCompleteness } from './adapters';
  * `gather_more`. A ledger written under v1 recorded a decision the current
  * policy would not reach, so it is not readable as a v2 decision.
  *
- * v3 does the same for code context. A validated GitHub pull request, commit,
- * or issue now supports it, and an incident that gathered GitHub without
- * linking one holds at `gather_more` instead of carrying a permanent gap. Every
- * v2 ledger recorded `code_context_not_linked` unconditionally, so a v2
- * decision cannot be read as a v3 one. */
-export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v3';
+ * v3 gave code context a satisfier: a validated GitHub pull request, commit, or
+ * issue now supports it, instead of the gap being appended to every ledger.
+ *
+ * v4 made that requirement advisory. A run collects every recent repository
+ * object whether or not any relates to the incident, so "GitHub returned things
+ * and the finding cited none" is usually about relevance rather than missing
+ * work. Code context still reports its status and its gap; it no longer decides.
+ * Sentry stays blocking, because a returned error group is a candidate cause. A
+ * v3 ledger could record a `code_context_not_linked` decision that v4 cannot
+ * reach, so it is not readable as a v4 decision. */
+export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v4';
 export const SOURCE_EVIDENCE_CONTEXT_VERSION = 1 as const;
 
 export const INCIDENT_EVIDENCE_SOURCES = ['posthog', 'stripe', 'sentry', 'github'] as const;
