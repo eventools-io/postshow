@@ -1,14 +1,16 @@
 import { useCallback } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ReplayLinks } from '@/components/ReplayLinks';
+import { SentryIssueLinks } from '@/components/SentryIssueLinks';
 import { ErrorRow, LoadingRow, Section } from '@/components/page';
-import { fetchIncidentDossier, fetchPosthogReplayConfig } from '@/lib/api';
+import { fetchIncidentDossier, fetchPosthogReplayConfig, fetchSentryIssueConfig } from '@/lib/api';
 import type {
   Account,
   IncidentDossier,
   IncidentEvidenceDecision,
   IncidentEvidenceRequirement,
   PosthogReplayConfig,
+  SentryIssueConfig,
 } from '@/lib/types';
 import { usePageData } from '@/lib/usePageData';
 import { useWorkspace } from '@/state/WorkspaceContext';
@@ -26,7 +28,8 @@ const REQUIREMENT_LABELS: Record<IncidentEvidenceRequirement['key'], string> = {
 const GAP_LABELS: Record<string, string> = {
   account_identity_not_grounded: 'No affected account is grounded to this incident yet.',
   technical_failure_not_linked: 'No Sentry issue is linked to this incident yet.',
-  code_context_not_linked: 'No GitHub code reference is linked to this incident yet.',
+  code_context_not_linked:
+    'No GitHub code reference is linked. Postshow does not attach repository objects to incidents yet, so this gap stays open on every incident.',
   recovery_check_missing: 'The recovery check is not measurable yet.',
   behavior_evidence_missing: 'No source-grounded behavior evidence remains attached.',
   evidence_not_evaluated: 'The evidence decision is unavailable for this incident.',
@@ -56,6 +59,7 @@ function mrr(account: Account): string {
 interface IncidentPageData {
   dossier: IncidentDossier;
   replay: PosthogReplayConfig | null;
+  sentry: SentryIssueConfig | null;
 }
 
 export function IncidentPage() {
@@ -64,17 +68,21 @@ export function IncidentPage() {
   const workspaceId = workspace?.id ?? '';
   const fetcher = useCallback(async (): Promise<IncidentPageData> => {
     if (!UUID.test(incidentId)) throw new Error('Incident not found.');
-    const [dossier, replay] = await Promise.all([
+    const [dossier, replay, sentry] = await Promise.all([
       fetchIncidentDossier(workspaceId, incidentId),
       fetchPosthogReplayConfig(workspaceId),
+      fetchSentryIssueConfig(workspaceId),
     ]);
-    return { dossier, replay };
+    return { dossier, replay, sentry };
   }, [incidentId, workspaceId]);
   const { data, loading, error } = usePageData(fetcher);
 
   if (loading) return <LoadingRow />;
   if (error || !data) return <ErrorRow message={error || 'Incident not found.'} />;
-  const { incident, accounts, fieldNotes, inboxItems } = data.dossier;
+  const { incident, accounts, references, fieldNotes, inboxItems } = data.dossier;
+  const sentryReferences = references.filter(
+    (reference) => reference.provider === 'sentry' && reference.object_type === 'issue'
+  );
   const sessionIds = incident.evidence_refs.session_ids ?? [];
   const coverage = incident.evidence_refs.source_coverage ?? {};
   const coverageReasons = coverage.reasons ?? [];
@@ -147,6 +155,16 @@ export function IncidentPage() {
                 <p className="m-0 mt-1 font-public-mono text-[9px] text-night-fg-3">
                   {requirement.evidence_count} linked · {requirement.sources.join(' + ')}
                 </p>
+                {requirement.key === 'technical_failure' && sentryReferences.length > 0 ? (
+                  <div className="mt-2">
+                    <SentryIssueLinks references={sentryReferences} config={data.sentry} />
+                    {!data.sentry ? (
+                      <p className="m-0 font-public-mono text-[9px] text-night-fg-3">
+                        Reconnect Sentry to open these issues.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>

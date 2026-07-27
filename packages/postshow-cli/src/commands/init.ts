@@ -36,6 +36,9 @@ export interface ConnectorPlan {
   test: (meta: Record<string, unknown>, secret: Record<string, unknown>) => Promise<AdapterResult>;
   /** The provider cannot ever be registered with a cloud-side credential. */
   forceLocalOnly?: boolean;
+  /** `postshow run` gathers evidence from this provider on the machine that
+   * executes the job, so a device needs its own copy of the credential. */
+  localSource?: boolean;
 }
 
 export interface ConnectorSetupDependencies {
@@ -94,6 +97,7 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'api_key', question: 'PostHog personal API key (read-only)', secret: true },
     ],
     test: (meta, secret) => posthogTest(meta, secret),
+    localSource: true,
   },
   {
     provider: 'stripe',
@@ -103,6 +107,7 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'api_key', question: 'Stripe restricted key (read-only, rk_...)', secret: true },
     ],
     test: (_meta, secret) => stripeTest(secret),
+    localSource: true,
   },
   {
     provider: 'postgres',
@@ -122,6 +127,7 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
     ],
     test: (_meta, secret) => postgresTest(secret),
     forceLocalOnly: true,
+    localSource: true,
   },
   {
     provider: 'sentry',
@@ -133,6 +139,7 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'token', question: 'Sentry auth token (read-only)', secret: true },
     ],
     test: (meta, secret) => sentryTest(meta, secret),
+    localSource: true,
   },
   {
     provider: 'github',
@@ -143,6 +150,7 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
       { key: 'token', question: 'GitHub token', secret: true },
     ],
     test: (meta, secret) => githubTest(meta, secret),
+    localSource: true,
   },
   {
     provider: 'linear',
@@ -172,6 +180,39 @@ export const CONNECTOR_PLANS: ConnectorPlan[] = [
     test: (_meta, secret) => slackTest(secret),
   },
 ];
+
+export interface WorkspaceConnection {
+  provider: string;
+  status: string;
+  local_only: boolean;
+}
+
+export type ConnectorSetupState =
+  /** Nothing left to ask: this device holds a verified credential, or the
+   * workspace connection already covers everything Postshow reads. */
+  | 'satisfied'
+  /** The workspace is connected, but nothing on this machine can gather from
+   * it. A workspace connection never hands a credential back to a device, so
+   * the only way out is to enter it here. */
+  | 'device-credential-missing'
+  | 'unconfigured';
+
+export function connectorSetupState(
+  plan: ConnectorPlan,
+  connections: WorkspaceConnection[],
+  local: LocalConnector[]
+): ConnectorSetupState {
+  if (local.some((connector) => connector.provider === plan.provider && connector.verified)) {
+    return 'satisfied';
+  }
+  const connection = connections.find(
+    (candidate) => candidate.provider === plan.provider && candidate.status === 'connected'
+  );
+  if (!connection) return 'unconfigured';
+  return plan.localSource === true || connection.local_only
+    ? 'device-credential-missing'
+    : 'satisfied';
+}
 
 export async function setupConnector(
   config: CliConfig,
@@ -562,30 +603,25 @@ export async function runInit(): Promise<number> {
     dim('nothing auto-detected in this directory; you can still add connectors');
   }
 
-  const existing = await gateway<{
-    connections: { provider: string; status: string; local_only: boolean }[];
-  }>(config, 'connections.list');
-  const alreadyConnected = new Set(
-    existing.connections
-      .filter((connection) => {
-        if (connection.status !== 'connected') return false;
-        if (!connection.local_only) return true;
-        return config.connectors.some(
-          (local) => local.provider === connection.provider && local.localOnly && local.verified
-        );
-      })
-      .map((connection) => connection.provider)
+  const existing = await gateway<{ connections: WorkspaceConnection[] }>(
+    config,
+    'connections.list'
   );
 
   for (const plan of CONNECTOR_PLANS) {
-    if (alreadyConnected.has(plan.provider)) {
+    const state = connectorSetupState(plan, existing.connections, config.connectors);
+    if (state === 'satisfied') {
       dim(`${plan.provider}: already connected, skipping`);
       continue;
+    }
+    if (state === 'device-credential-missing') {
+      say(`${plan.provider} is connected in the workspace but not on this machine.`);
+      dim('a workspace connection never supplies a credential to a device; enter it here');
     }
     const hit = detected.find((d) => d.provider === plan.provider);
     const wanted = await confirm(
       `Set up ${plan.label}?`,
-      Boolean(hit) || plan.provider === 'posthog'
+      state === 'device-credential-missing' || Boolean(hit) || plan.provider === 'posthog'
     );
     if (!wanted) continue;
     try {

@@ -64,6 +64,27 @@ jobs:
           overwrite: true
           retention-days: 7
 
+  e2e:
+    name: Browser Journey (Playwright)
+    # The unit suite renders in happy-dom, so nothing else here proves the
+    # routed, lazily loaded app boots in an engine for a signed-in reviewer.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: ./.github/actions/setup-node-pnpm
+      - name: Install the Chromium build Playwright pins
+        run: pnpm --filter @eventools/postshow exec playwright install --with-deps chromium
+      - name: Walk the incident review spine
+        run: pnpm test:e2e
+      - name: Upload the failure trace
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: postshow-e2e-trace
+          path: apps/postshow/test-results
+          retention-days: 7
+
   audit:
     name: Dependency Audit
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON(vars.CI_GENERAL_RUNNER_LABELS_JSON || '"ubuntu-latest"') }}

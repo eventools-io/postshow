@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { WorkspaceExportPanel } from './WorkspaceExportPanel';
+import { SOURCE_CLI_COMMAND } from '@/lib/cli';
 import { fetchPublicReleaseGates } from '@/lib/auth';
 import { PostshowFunctionError } from '@/lib/functionClient';
 import {
@@ -315,15 +316,13 @@ describe('WorkspaceExportPanel', () => {
       configurable: true,
       value: { writeText },
     });
-    const command = `node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js export verify ${filename} ${filename}.integrity.json`;
+    const command = `${SOURCE_CLI_COMMAND} export verify ${filename} ${filename}.integrity.json`;
 
     render(<WorkspaceExportPanel workspaceId={workspaceId} />);
 
     expect(await screen.findByText(command)).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'node /absolute/path/to/postshow/packages/postshow-cli/dist/index.js export verify <artifact> <manifest>'
-      )
+      screen.getByText(`${SOURCE_CLI_COMMAND} export verify <artifact> <manifest>`)
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /copy verification command/i }));
 

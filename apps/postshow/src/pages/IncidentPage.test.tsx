@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchIncidentDossier, fetchPosthogReplayConfig } from '@/lib/api';
+import { INCIDENT_EVIDENCE_POLICY_VERSION } from '@eventools/postshow-core';
+import { fetchIncidentDossier, fetchPosthogReplayConfig, fetchSentryIssueConfig } from '@/lib/api';
 import type { IncidentDossier } from '@/lib/types';
 import { IncidentPage } from './IncidentPage';
 
@@ -10,6 +11,7 @@ const INCIDENT_ID = '71000000-0000-4000-8000-000000000001';
 vi.mock('@/lib/api', () => ({
   fetchIncidentDossier: vi.fn(),
   fetchPosthogReplayConfig: vi.fn(),
+  fetchSentryIssueConfig: vi.fn(),
 }));
 vi.mock('@/state/WorkspaceContext', () => ({
   useWorkspace: () => ({ workspace: { id: 'workspace-1' } }),
@@ -17,6 +19,7 @@ vi.mock('@/state/WorkspaceContext', () => ({
 
 const fetchDossier = vi.mocked(fetchIncidentDossier);
 const fetchReplay = vi.mocked(fetchPosthogReplayConfig);
+const fetchSentry = vi.mocked(fetchSentryIssueConfig);
 
 function dossier(): IncidentDossier {
   return {
@@ -39,7 +42,7 @@ function dossier(): IncidentDossier {
       verification_contract: { metric: 'repeat_session_count', baseline: 2, status: 'pending' },
       measured_outcome: { status: 'pending' },
       evidence_ledger: {
-        policy_version: 'incident-evidence-v1',
+        policy_version: INCIDENT_EVIDENCE_POLICY_VERSION,
         evaluated_run_id: '72000000-0000-4000-8000-000000000001',
         decision: 'act',
         reason_code: 'grounded_action_ready_for_review',
@@ -89,31 +92,96 @@ function dossier(): IncidentDossier {
       updated_at: '2026-07-22T00:00:00.000Z',
     },
     accounts: [],
+    references: [],
     fieldNotes: [],
     inboxItems: [],
   };
+}
+
+function dossierWithLinkedIssue(): IncidentDossier {
+  const base = dossier();
+  const ledger = base.incident.evidence_ledger;
+  return {
+    ...base,
+    incident: {
+      ...base.incident,
+      evidence_ledger: {
+        ...ledger,
+        requirements: ledger.requirements.map((requirement) =>
+          requirement.key === 'technical_failure'
+            ? { ...requirement, status: 'supported' as const, evidence_count: 1 }
+            : requirement
+        ),
+        gaps: ['code_context_not_linked'],
+      },
+    },
+    references: [
+      {
+        id: '73000000-0000-4000-8000-000000000001',
+        provider: 'sentry',
+        object_type: 'issue',
+        sentry_issue_id: '6042118',
+      },
+      // The reference table is meant to grow past Sentry. A row for another
+      // provider must not become a sentry.io link just because it carries a
+      // numeric identifier in the same column.
+      {
+        id: '73000000-0000-4000-8000-000000000002',
+        provider: 'github',
+        object_type: 'pull_request',
+        sentry_issue_id: '99',
+      },
+    ],
+  };
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={[`/incidents/${INCIDENT_ID}`]}>
+      <Routes>
+        <Route path="/incidents/:incidentId" element={<IncidentPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
 }
 
 describe('IncidentPage evidence decision', () => {
   beforeEach(() => {
     fetchDossier.mockReset().mockResolvedValue(dossier());
     fetchReplay.mockReset().mockResolvedValue(null);
+    fetchSentry.mockReset().mockResolvedValue(null);
   });
 
   it('shows the deterministic decision, policy, requirements, and open gaps', async () => {
-    render(
-      <MemoryRouter initialEntries={[`/incidents/${INCIDENT_ID}`]}>
-        <Routes>
-          <Route path="/incidents/:incidentId" element={<IncidentPage />} />
-        </Routes>
-      </MemoryRouter>
-    );
+    renderPage();
 
     expect(await screen.findByRole('heading', { name: /act/i })).toBeInTheDocument();
-    expect(screen.getByText(/incident-evidence-v1/i)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(INCIDENT_EVIDENCE_POLICY_VERSION, 'i'))).toBeInTheDocument();
     expect(screen.getByText(/does not execute the intervention/i)).toBeInTheDocument();
     expect(screen.getByText('Technical failure evidence')).toBeInTheDocument();
     expect(screen.getByText(/no sentry issue is linked/i)).toBeInTheDocument();
     expect(screen.getByText(/no github code reference is linked/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /issue/i })).not.toBeInTheDocument();
+  });
+
+  it('cites each linked Sentry issue by identifier beside the requirement it supports', async () => {
+    fetchDossier.mockResolvedValue(dossierWithLinkedIssue());
+    fetchSentry.mockResolvedValue({ orgSlug: 'acme' });
+    renderPage();
+
+    const link = await screen.findByRole('link', { name: 'issue 6042118 ↗' });
+    expect(link).toHaveAttribute('href', 'https://sentry.io/organizations/acme/issues/6042118/');
+    expect(link.closest('li')?.textContent).toContain('Technical failure evidence');
+    expect(screen.getAllByRole('link', { name: /^issue/ })).toHaveLength(1);
+    expect(screen.queryByText(/no sentry issue is linked/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/no github code reference is linked/i)).toBeInTheDocument();
+  });
+
+  it('says why a linked issue has no deep link when the Sentry connection is gone', async () => {
+    fetchDossier.mockResolvedValue(dossierWithLinkedIssue());
+    renderPage();
+
+    expect(await screen.findByText(/reconnect sentry to open these issues/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /issue/i })).not.toBeInTheDocument();
   });
 });

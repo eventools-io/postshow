@@ -25,6 +25,7 @@
     "lint": "pnpm -r --if-present lint",
     "type-check": "pnpm -r type-check",
     "test": "pnpm -r --if-present test && pnpm governance:check",
+    "test:e2e": "pnpm --filter @eventools/postshow test:e2e",
     "governance:check": "node --test scripts/check-repository-governance.test.mjs && node scripts/check-repository-governance.mjs",
     "governance:check:built": "node scripts/check-repository-governance.mjs --built-site",
     "governance:check:site-built": "node scripts/check-repository-governance.mjs --built-site --site-dependencies",

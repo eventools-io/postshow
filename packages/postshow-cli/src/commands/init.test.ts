@@ -1,13 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultConfig } from '../config';
+import { defaultConfig, type LocalConnector } from '../config';
 import {
   CONNECTOR_PLANS,
+  connectorSetupState,
   setupConnector,
   setupEngine,
   type ConnectorPlan,
   type ConnectorSetupDependencies,
   type EngineSetupDependencies,
 } from './init';
+
+function connectorPlan(provider: string): ConnectorPlan {
+  const plan = CONNECTOR_PLANS.find((candidate) => candidate.provider === provider);
+  if (!plan) throw new Error(`${provider} connector plan is missing`);
+  return plan;
+}
+
+function deviceConnector(provider: string, verified: boolean): LocalConnector {
+  return { provider, label: '', localOnly: true, verified, meta: {}, secret: { api_key: 'k' } };
+}
 
 function testPlan(test: ConnectorPlan['test']): ConnectorPlan {
   return {
@@ -343,6 +354,68 @@ describe('setupConnector', () => {
     );
 
     expect(verifies).toBe(1);
+  });
+});
+
+describe('connectorSetupState', () => {
+  it('asks again for a source the workspace holds, because the credential never comes back', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('posthog'),
+        [{ provider: 'posthog', status: 'connected', local_only: false }],
+        []
+      )
+    ).toBe('device-credential-missing');
+  });
+
+  it('asks again when a device-only connection has no verified credential here', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('slack'),
+        [{ provider: 'slack', status: 'connected', local_only: true }],
+        []
+      )
+    ).toBe('device-credential-missing');
+  });
+
+  it('leaves a cloud-executed connector alone so setup never repeats a Slack test message', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('slack'),
+        [{ provider: 'slack', status: 'connected', local_only: false }],
+        []
+      )
+    ).toBe('satisfied');
+  });
+
+  it('skips a source this device has already verified', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('stripe'),
+        [{ provider: 'stripe', status: 'connected', local_only: false }],
+        [deviceConnector('stripe', true)]
+      )
+    ).toBe('satisfied');
+  });
+
+  it('treats an unverified device credential as missing rather than configured', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('stripe'),
+        [{ provider: 'stripe', status: 'connected', local_only: false }],
+        [deviceConnector('stripe', false)]
+      )
+    ).toBe('device-credential-missing');
+  });
+
+  it('ignores a workspace connection that is not connected', () => {
+    expect(
+      connectorSetupState(
+        connectorPlan('sentry'),
+        [{ provider: 'sentry', status: 'error', local_only: false }],
+        []
+      )
+    ).toBe('unconfigured');
   });
 });
 

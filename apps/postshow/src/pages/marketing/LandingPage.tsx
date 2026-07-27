@@ -37,7 +37,7 @@ const EVIDENCE_REQUIREMENTS = [
   ['Account', 'Deterministic Stripe identity links'],
   ['Technical failure', 'An incident-specific Sentry issue'],
   ['Code context', 'A validated GitHub repository object'],
-  ['Recovery check', 'A cohort, measure, window, and threshold'],
+  ['Recovery check', 'A saved metric, a baseline, a direction, and a window'],
 ] as const;
 
 const FAQ = [
@@ -47,7 +47,7 @@ const FAQ = [
   },
   {
     q: 'What works today?',
-    a: 'The closed-beta foundation persists replay evidence, deterministic account links, current revenue exposure, proposed actions, a recovery plan, and a policy-owned act, gather-more, or abstain decision in one incident. Exact GitHub and Sentry references, automated fix preparation, and measured outcomes are the next delivery slices.',
+    a: 'The closed-beta foundation persists replay evidence, deterministic account links, current revenue exposure, linked Sentry issues, proposed actions, a recovery plan, and a policy-owned act, gather-more, or abstain decision in one incident. Exact GitHub references, automated fix preparation, and measured outcomes are the next delivery slices.',
   },
   {
     q: 'Can Postshow send messages or merge code by itself?',
@@ -202,10 +202,11 @@ function DemoSection() {
           </h2>
         </div>
         <p className="m-0 max-w-[62ch] font-public-sans text-[15px] leading-[1.65] text-shell-fg-2 md:justify-self-end">
-          The authenticated beta already keeps replay evidence, deterministic account impact, a
-          policy-owned evidence decision, proposed actions, and a recovery plan together. This
-          walkthrough uses synthetic data to show the complete target loop. Exact code and error
-          references, intervention execution, and measured outcomes are still being built.
+          The authenticated beta already keeps replay evidence, deterministic account impact, linked
+          Sentry issues, a policy-owned evidence decision, proposed actions, and a recovery plan
+          together. This walkthrough uses synthetic data to show the complete target loop. Exact
+          GitHub code references, intervention execution, and measured outcomes are still being
+          built.
         </p>
       </div>
       <div className="mt-10">
@@ -325,10 +326,13 @@ function OutcomeSection() {
         </div>
         <div>
           <p className="m-0 font-public-sans text-[15px] leading-[1.65] text-shell-fg-2">
-            Postshow saves the recovery measure before an intervention. It returns after the
-            observation window with the baseline, current value, affected cohort, and guardrails.
+            Postshow saves the recovery measure before an intervention. Today that is a metric, a
+            baseline, a direction, and a window, written onto the incident the moment it forms.
           </p>
-          <ul className="m-0 mt-6 flex list-none flex-wrap gap-2 p-0" aria-label="Outcome states">
+          <ul
+            className="m-0 mt-6 flex list-none flex-wrap gap-2 p-0"
+            aria-label="Planned outcome states"
+          >
             {['recovered', 'improving', 'unchanged', 'regressed', 'inconclusive'].map((outcome) => (
               <li
                 key={outcome}
@@ -339,8 +343,9 @@ function OutcomeSection() {
             ))}
           </ul>
           <p className="m-0 mt-5 font-public-sans text-[13px] leading-[1.55] text-shell-fg-3">
-            Negative and inconclusive results stay on the incident. Postshow does not rewrite them
-            as a win.
+            Postshow does not report an outcome yet. These five are what the recovery check will
+            return, and the negative and inconclusive ones will stay on the incident instead of
+            being rewritten as a win.
           </p>
         </div>
       </div>

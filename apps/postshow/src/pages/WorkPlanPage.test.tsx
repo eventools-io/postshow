@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { WorkPlanPage } from './WorkPlanPage';
+import { SOURCE_CLI_COMMAND } from '@/lib/cli';
 import { createJob, fetchJobs, fetchRuns, fetchWorkspacePermissions, runJobNow } from '@/lib/api';
 import { track } from '@/lib/analytics';
 import type { Job, WorkspacePermissions } from '@/lib/types';
@@ -139,9 +140,7 @@ describe('WorkPlanPage runtime contracts', () => {
     await user.click(await screen.findByRole('button', { name: /run on device/i }));
 
     expect(runNow).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/node \/absolute\/path\/to\/postshow\/.+ run --job job-local-1/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(`${SOURCE_CLI_COMMAND} run --job job-local-1`)).toBeInTheDocument();
   });
 
   it('reuses one actor/workspace/job request UUID after a lost response and clears it only on success', async () => {

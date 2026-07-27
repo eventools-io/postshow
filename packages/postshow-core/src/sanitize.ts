@@ -18,6 +18,7 @@ export interface CleanFieldNote {
   sessions: number;
   session_ids: string[];
   account_identity_keys: string[];
+  sentry_issue_ids: string[];
   root_cause_hypothesis: string;
   severity: string;
   fingerprint: string;
@@ -35,6 +36,7 @@ export interface CleanInboxItem {
   account_name: string;
   session_ids: string[];
   account_identity_keys: string[];
+  sentry_issue_ids: string[];
   fingerprint: string;
   incident_fingerprint: string;
 }
@@ -120,6 +122,25 @@ function sessionIds(value: unknown, allowed: ReadonlySet<string>): string[] {
   return [...unique];
 }
 
+// Sentry issue ids are numeric strings. Short ids, permalinks, and anything the
+// model composed itself are not references and never become one.
+const SENTRY_ISSUE_ID = /^[0-9]{1,32}$/;
+
+export function canonicalSentryIssueId(value: unknown): string | null {
+  return typeof value === 'string' && SENTRY_ISSUE_ID.test(value) ? value : null;
+}
+
+function sentryIssueIds(value: unknown, allowed: ReadonlySet<string>): string[] {
+  const unique = new Set<string>();
+  for (const candidate of array(value)) {
+    const id = canonicalSentryIssueId(candidate);
+    if (!id || !allowed.has(id)) continue;
+    unique.add(id);
+    if (unique.size >= OUTPUT_LIMITS.sentryIssueIds) break;
+  }
+  return [...unique];
+}
+
 function groundedAccountIdentityKeys(
   citedSessions: readonly string[],
   accountsBySession: ReadonlyMap<string, string>
@@ -152,6 +173,7 @@ export function sanitizeModelOutput(
   options: {
     allowedSessionIds: Iterable<string>;
     allowedAccountIdentityKeys: Iterable<string>;
+    allowedSentryIssueIds: Iterable<string>;
     sessionAccountIdentityKeys?: Iterable<readonly [string, string]>;
   }
 ): CleanOutput {
@@ -166,6 +188,12 @@ export function sanitizeModelOutput(
     Array.from(options.allowedAccountIdentityKeys).filter((value) =>
       /^stripe:[A-Za-z0-9_-]{1,200}$/.test(value)
     )
+  );
+  const allowedSentryIssueIds = new Set(
+    Array.from(options.allowedSentryIssueIds).flatMap((value) => {
+      const id = canonicalSentryIssueId(value);
+      return id ? [id] : [];
+    })
   );
   const accountsBySession = new Map<string, string>();
   for (const [rawSessionId, rawAccountIdentityKey] of options.sessionAccountIdentityKeys ?? []) {
@@ -194,6 +222,7 @@ export function sanitizeModelOutput(
         : 0,
       session_ids: groundedSessionIds,
       account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
+      sentry_issue_ids: sentryIssueIds(note.sentry_issue_ids, allowedSentryIssueIds),
       root_cause_hypothesis: text(note.root_cause_hypothesis, 1000),
       severity: SEVERITIES.has(String(note.severity ?? '')) ? String(note.severity) : 'medium',
       fingerprint,
@@ -226,6 +255,7 @@ export function sanitizeModelOutput(
       account_name: text(item.account_name, 200),
       session_ids: groundedSessionIds,
       account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
+      sentry_issue_ids: sentryIssueIds(item.sentry_issue_ids, allowedSentryIssueIds),
       fingerprint: text(item.fingerprint, 120),
       incident_fingerprint: allowedIncidentFingerprints.has(text(item.incident_fingerprint, 120))
         ? text(item.incident_fingerprint, 120)
