@@ -23,7 +23,7 @@ import {
   taskClassForJobKind,
   type GatherCompleteness,
   type GatherResult,
-  type GithubPr,
+  type GithubGather,
   type ModelOutput,
   type OutcomeStats,
   type PosthogGather,
@@ -517,7 +517,7 @@ export async function executeLocalJob(
     let posthog: PosthogGather | null = null;
     let stripe: GatherResult<StripeAccount[]> | null = null;
     let sentry: SentryGather | null = null;
-    let github: GatherResult<GithubPr[]> | null = null;
+    let github: GithubGather | null = null;
     let postgresSnapshot: PostgresSnapshot | null = null;
     let sessionsWatched = 0;
 
@@ -562,7 +562,7 @@ export async function executeLocalJob(
         provider: 'github',
         gather: async () => {
           github = await dependencies.githubGather(gh.meta, gh.secret, windowDays);
-          dependencies.dim(`  github: ${github.data.length} merged PRs`);
+          dependencies.dim(`  github: ${github.data.length} merged PRs, ${github.objects.length} citable objects`);
           warnIncompleteGather('github', github.completeness, dependencies);
         },
       });
@@ -651,7 +651,7 @@ export async function executeLocalJob(
     const gatheredPosthog = posthog as PosthogGather | null;
     const gatheredStripe = stripe as GatherResult<StripeAccount[]> | null;
     const gatheredSentry = sentry as SentryGather | null;
-    const gatheredGithub = github as GatherResult<GithubPr[]> | null;
+    const gatheredGithub = github as GithubGather | null;
     const sourceAccounts = stripeSourceAccounts(gatheredStripe);
     const identityContext = sourceIdentityContext(gatheredPosthog, gatheredStripe);
     const evidenceContext = sourceEvidenceContext({
@@ -664,6 +664,8 @@ export async function executeLocalJob(
       allowedSessionIds: gatheredPosthog?.samples.map((sample) => sample.sid) ?? [],
       allowedAccountIdentityKeys: sourceAccounts.map((account) => account.identityKey),
       allowedSentryIssueIds: gatheredSentry?.data.map((issue) => issue.id) ?? [],
+      allowedGithubObjectRefs:
+        gatheredGithub?.objects.map((object) => `${object.type}:${object.id}`) ?? [],
       sessionAccountIdentityKeys: identityContext.sessions.map(
         (session) => [session.sessionId, session.accountIdentityKey] as const
       ),
@@ -702,6 +704,23 @@ export async function executeLocalJob(
                 issues: gatheredSentry.data.map((issue) => ({
                   id: issue.id,
                   lastSeen: issue.lastSeen,
+                })),
+              }
+            : null,
+        // The same bargain as `sentry_source`, for code context: the repository
+        // objects this run actually collected, with the window that produced
+        // them, so the workspace can revalidate a cited object instead of
+        // trusting this machine. Titles and URLs stay on this device; the
+        // gateway rebuilds links from the repository it has on file.
+        github_source:
+          gatheredGithub && gh
+            ? {
+                repo: gatheredGithub.repo,
+                window: gatheredGithub.window,
+                objects: gatheredGithub.objects.map((object) => ({
+                  type: object.type,
+                  id: object.id,
+                  lastSeen: object.lastSeen,
                 })),
               }
             : null,

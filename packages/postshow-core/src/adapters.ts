@@ -5,7 +5,13 @@
 // stays in the edge runtime.
 
 import { isUnsafePublicHostname } from './network';
-import { canonicalSentryIssueId, canonicalSessionId } from './sanitize';
+import {
+  canonicalGithubObjectId,
+  canonicalGithubRepo,
+  canonicalSentryIssueId,
+  canonicalSessionId,
+  type GithubObjectType,
+} from './sanitize';
 
 export const ADAPTER_TIMEOUT_MS = 20_000;
 const MAX_ADAPTER_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -513,6 +519,33 @@ export interface GithubPr {
   mergedAt: string;
 }
 
+/** The exact update range one run asked GitHub for. It travels with the objects
+ * for the same reason the Sentry window does: a cited object is only evidence
+ * if the collection that produced it covers when the object was last touched. */
+export interface GithubCollectionWindow {
+  days: number;
+  since: string;
+  until: string;
+}
+
+/** One repository object this run actually collected. `type` and `id` are the
+ * pair a finding may cite, `repo` scopes that pair to a repository, and
+ * `lastSeen` is what places it inside the window. Titles are provider-authored
+ * text and are redacted on the way in. */
+export interface GithubObject {
+  type: GithubObjectType;
+  id: string;
+  title: string;
+  url: string;
+  lastSeen: string;
+}
+
+export interface GithubGather extends GatherResult<GithubPr[]> {
+  repo: string;
+  window: GithubCollectionWindow;
+  objects: GithubObject[];
+}
+
 export async function githubTest(
   meta: Record<string, unknown>,
   secret: Record<string, unknown>
@@ -537,56 +570,175 @@ export async function githubRecentPrs(
 }
 
 const GITHUB_PULL_PAGE_CAP = 10;
+const GITHUB_OBJECT_PAGE_CAP = 5;
+
+/** Deep links are built from the validated repository and identifier this run
+ * collected, never from a URL the provider or the model handed us. */
+export function githubObjectUrl(repo: string, type: GithubObjectType, id: string): string {
+  const segment = type === 'commit' ? 'commit' : type === 'pull_request' ? 'pull' : 'issues';
+  return `https://github.com/${repo}/${segment}/${id}`;
+}
+
+function githubTimestamp(value: unknown): string | null {
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+/** Walks one GitHub list endpoint to its page cap. The three object families
+ * differ only in their path, query, and row shape, so paging, transport
+ * failure, and the cap live here once rather than three times. */
+async function githubPages(
+  repo: string,
+  token: string,
+  path: string,
+  query: Record<string, string>,
+  maxPages: number,
+  label: string,
+  onRow: (row: Record<string, unknown>) => void
+): Promise<{ complete: boolean; reason?: string }> {
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = new URL(`https://api.github.com/repos/${repo}/${path}`);
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    url.searchParams.set('per_page', '100');
+    url.searchParams.set('page', String(page));
+    const response = await adapterResponse(url.toString(), {
+      headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'postshow' },
+    });
+    if (!response.ok) throw new Error(`github ${label} failed (${response.status})`);
+    const payload: unknown = await response.json();
+    if (!Array.isArray(payload)) throw new Error(`github ${label} returned a non-array payload`);
+    for (const raw of payload) {
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        onRow(raw as Record<string, unknown>);
+      }
+    }
+    if (payload.length < 100) return { complete: true };
+  }
+  return {
+    complete: false,
+    reason: `${label} exceeded the ${maxPages * 100}-record safety cap`,
+  };
+}
 
 export async function githubGather(
   meta: Record<string, unknown>,
   secret: Record<string, unknown>,
   days: number,
   options: GatherPageOptions = {}
-): Promise<GatherResult<GithubPr[]>> {
-  const repo = String(meta.repo || '');
+): Promise<GithubGather> {
+  const repo = canonicalGithubRepo(meta.repo);
   const token = String(secret.token || '');
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo))
-    throw new Error('invalid GitHub repository');
-  const safeDays = Math.min(30, Math.max(1, Math.round(days)));
-  const cutoff = Date.now() - safeDays * 86400_000;
-  const maxPages = pageLimit(options.maxPages, GITHUB_PULL_PAGE_CAP);
-  const prs: GithubPr[] = [];
-  let complete = false;
-  for (let page = 1; page <= maxPages; page += 1) {
-    const url = new URL(`https://api.github.com/repos/${repo}/pulls`);
-    url.searchParams.set('state', 'closed');
-    url.searchParams.set('sort', 'updated');
-    url.searchParams.set('direction', 'desc');
-    url.searchParams.set('per_page', '100');
-    url.searchParams.set('page', String(page));
-    const response = await adapterResponse(url.toString(), {
-      headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'postshow' },
-    });
-    if (!response.ok) throw new Error(`github pull requests failed (${response.status})`);
-    const rows = (await response.json()) as {
-      number: number;
-      title: string;
-      merged_at: string | null;
-      updated_at?: string | null;
-    }[];
-    for (const pr of rows) {
-      if (pr.merged_at && new Date(pr.merged_at).getTime() > cutoff) {
-        prs.push({ number: pr.number, title: pr.title, mergedAt: pr.merged_at });
-      }
-    }
-    const oldestUpdated = Date.parse(rows.at(-1)?.updated_at ?? '');
-    if (rows.length < 100 || (Number.isFinite(oldestUpdated) && oldestUpdated <= cutoff)) {
-      complete = true;
-      break;
-    }
+  if (!repo) throw new Error('invalid GitHub repository');
+  // The window is provenance, not a display detail, so an unusable one is an
+  // error rather than a silently degraded range.
+  if (!Number.isFinite(days)) {
+    throw new Error('github collection window must be a finite number of days');
   }
+  const safeDays = Math.min(30, Math.max(1, Math.round(days)));
+  const until = Date.now();
+  const cutoff = until - safeDays * 86400_000;
+  const window: GithubCollectionWindow = {
+    days: safeDays,
+    since: new Date(cutoff).toISOString(),
+    until: new Date(until).toISOString(),
+  };
+  const maxPages = pageLimit(options.maxPages, GITHUB_PULL_PAGE_CAP);
+  const objectPages = pageLimit(options.maxChildPages, GITHUB_OBJECT_PAGE_CAP);
+  const prs: GithubPr[] = [];
+  const objects: GithubObject[] = [];
+  const seen = new Set<string>();
+  const incompleteReasons = new Set<string>();
+
+  const collect = (type: GithubObjectType, rawId: unknown, title: unknown, lastSeen: unknown) => {
+    const id = canonicalGithubObjectId(type, rawId);
+    const seenAt = githubTimestamp(lastSeen);
+    // An object that cannot be named or placed in time can never become a
+    // reference, so it is dropped rather than padding the collection.
+    if (!id || !seenAt) return;
+    const key = `${type}:${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    objects.push({
+      type,
+      id,
+      title: privacySafeProviderText(title),
+      url: githubObjectUrl(repo, type, id),
+      lastSeen: seenAt,
+    });
+  };
+
+  const pulls = await githubPages(
+    repo,
+    token,
+    'pulls',
+    { state: 'closed', sort: 'updated', direction: 'desc' },
+    maxPages,
+    'pull requests',
+    (row) => {
+      const mergedAt = githubTimestamp(row.merged_at);
+      if (!mergedAt || Date.parse(mergedAt) <= cutoff) return;
+      const number = canonicalGithubObjectId('pull_request', row.number);
+      if (!number) return;
+      prs.push({
+        number: Number(number),
+        title: privacySafeProviderText(row.title),
+        mergedAt,
+      });
+      collect('pull_request', row.number, row.title, mergedAt);
+    }
+  );
+  if (!pulls.complete && pulls.reason) incompleteReasons.add(pulls.reason);
+
+  const commits = await githubPages(
+    repo,
+    token,
+    'commits',
+    { since: window.since, until: window.until },
+    objectPages,
+    'commits',
+    (row) => {
+      const commit = row.commit;
+      const committed =
+        commit && typeof commit === 'object' && !Array.isArray(commit)
+          ? ((commit as Record<string, unknown>).committer as Record<string, unknown> | undefined)
+          : undefined;
+      collect(
+        'commit',
+        row.sha,
+        commit && typeof commit === 'object'
+          ? (commit as Record<string, unknown>).message
+          : undefined,
+        committed?.date
+      );
+    }
+  );
+  if (!commits.complete && commits.reason) incompleteReasons.add(commits.reason);
+
+  const issues = await githubPages(
+    repo,
+    token,
+    'issues',
+    { state: 'all', sort: 'updated', direction: 'desc', since: window.since },
+    objectPages,
+    'issues',
+    (row) => {
+      // This endpoint returns pull requests as issues. They are already
+      // collected with their merge state, and citing the same object under two
+      // types would let one piece of evidence answer twice.
+      if (row.pull_request) return;
+      collect('issue', row.number, row.title, row.updated_at);
+    }
+  );
+  if (!issues.complete && issues.reason) incompleteReasons.add(issues.reason);
+
+  const complete = incompleteReasons.size === 0;
   return {
+    repo,
+    window,
+    objects,
     data: prs,
     completeness: completeness(complete, prs.length, {
-      reason: complete
-        ? undefined
-        : `closed pull-request history exceeded the ${maxPages * 100}-record safety cap`,
+      reason: complete ? undefined : [...incompleteReasons].join('; '),
     }),
   };
 }
@@ -789,29 +941,31 @@ export interface SentryGather extends GatherResult<SentryIssue[]> {
 }
 
 const SENTRY_ISSUE_PAGE_CAP = 5;
-const SENTRY_TEXT_MAX = 200;
+const PROVIDER_TEXT_MAX = 200;
 // deno-lint-ignore no-control-regex -- the C0 range and DEL are exactly what this class strips
-const SENTRY_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
-const SENTRY_EMAIL = /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g;
-const SENTRY_QUERY_STRING = /\?[^\s]*=[^\s]*/g;
-const SENTRY_HOME_DIRECTORY = /((?:[A-Za-z]:)?[\\/](?:Users|home))([\\/])[^\\/\s]+/g;
-const SENTRY_OPAQUE_TOKEN = /[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z0-9_-]{32,}|\d{6,}/gi;
+const PROVIDER_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/g;
+const PROVIDER_EMAIL = /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g;
+const PROVIDER_QUERY_STRING = /\?[^\s]*=[^\s]*/g;
+const PROVIDER_HOME_DIRECTORY = /((?:[A-Za-z]:)?[\\/](?:Users|home))([\\/])[^\\/\s]+/g;
+const PROVIDER_OPAQUE_TOKEN = /[0-9a-f]{8}-[0-9a-f-]{27,}|[A-Za-z0-9_-]{32,}|\d{6,}/gi;
 
-/** The `privacySafeUrl` treatment for provider-authored free text. Sentry issue
- * titles are written by whoever threw the exception inside the customer's
- * product, and they routinely carry breadcrumb emails, developer home
- * directories, query strings, and bearer tokens. Redaction happens here, at the
- * connector boundary, so nothing unredacted can reach a packet or a model. */
-export function privacySafeSentryText(raw: unknown): string {
+/** The `privacySafeUrl` treatment for provider-authored free text. A Sentry
+ * issue title is written by whoever threw the exception inside the customer's
+ * product; a GitHub pull-request or issue title is written by whoever opened
+ * it, which on a public repository is anyone at all. Both routinely carry
+ * breadcrumb emails, developer home directories, query strings, and bearer
+ * tokens. Redaction happens here, at the connector boundary, so nothing
+ * unredacted can reach a packet or a model. */
+export function privacySafeProviderText(raw: unknown): string {
   return String(raw ?? '')
-    .replace(SENTRY_CONTROL_CHARACTERS, ' ')
-    .replace(SENTRY_EMAIL, ':email')
-    .replace(SENTRY_QUERY_STRING, '?:redacted')
-    .replace(SENTRY_HOME_DIRECTORY, '$1$2:user')
-    .replace(SENTRY_OPAQUE_TOKEN, ':id')
+    .replace(PROVIDER_CONTROL_CHARACTERS, ' ')
+    .replace(PROVIDER_EMAIL, ':email')
+    .replace(PROVIDER_QUERY_STRING, '?:redacted')
+    .replace(PROVIDER_HOME_DIRECTORY, '$1$2:user')
+    .replace(PROVIDER_OPAQUE_TOKEN, ':id')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, SENTRY_TEXT_MAX);
+    .slice(0, PROVIDER_TEXT_MAX);
 }
 
 /** A permalink is a rendered link, never the reference itself, so an unusable
@@ -939,7 +1093,7 @@ export async function sentryGather(
       const count = Number(row.count ?? 0);
       issues.push({
         id,
-        title: privacySafeSentryText(row.title),
+        title: privacySafeProviderText(row.title),
         count: Number.isFinite(count) ? Math.max(0, Math.round(count)) : 0,
         permalink: sentryPermalink(row.permalink),
         firstSeen,
@@ -998,7 +1152,9 @@ export function packetSections(input: {
   /** Sentry has no data-only form: without its collection window an issue list
    * cannot be labeled honestly or validated later. */
   sentry: SentryGather | null;
-  github: ArrayGatherInput<GithubPr>;
+  /** GitHub lost its data-only form for the same reason: a cited repository
+   * object is only evidence if the window that collected it travels with it. */
+  github: GithubGather | null;
 }): string[] {
   const sections: string[] = [];
   if (input.posthog) {
@@ -1049,12 +1205,21 @@ export function packetSections(input: {
       }`
     );
   }
-  const github = normalizeArrayGather(input.github);
+  const github = input.github;
   if (github) {
     const presented = github.data.slice(0, 50);
+    const citable = github.objects.slice(0, 50);
     sections.push(
       completenessSummary('github merged pull requests', github.completeness, presented.length),
-      `RECENT MERGED PRS:\n${presented.map((pr) => `  #${pr.number} ${pr.title} (${pr.mergedAt})`).join('\n') || '  none'}`
+      `RECENT MERGED PRS:\n${presented.map((pr) => `  #${pr.number} ${pr.title} (${pr.mergedAt})`).join('\n') || '  none'}`,
+      `CITABLE ${github.repo} OBJECTS (code context; cite the bracketed ref verbatim):\n${
+        citable
+          .map(
+            (object) =>
+              `  [github_object=${object.type}:${object.id}] ${object.title} · last seen ${object.lastSeen}`
+          )
+          .join('\n') || '  none'
+      }`
     );
   }
   return sections;

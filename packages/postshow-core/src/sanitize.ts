@@ -19,6 +19,7 @@ export interface CleanFieldNote {
   session_ids: string[];
   account_identity_keys: string[];
   sentry_issue_ids: string[];
+  github_object_refs: string[];
   root_cause_hypothesis: string;
   severity: string;
   fingerprint: string;
@@ -37,6 +38,7 @@ export interface CleanInboxItem {
   session_ids: string[];
   account_identity_keys: string[];
   sentry_issue_ids: string[];
+  github_object_refs: string[];
   fingerprint: string;
   incident_fingerprint: string;
 }
@@ -141,6 +143,59 @@ function sentryIssueIds(value: unknown, allowed: ReadonlySet<string>): string[] 
   return [...unique];
 }
 
+/** The repository object kinds a finding may cite as code context. A repository
+ * on its own is deliberately absent: naming the repo the workspace already
+ * connected says nothing about any particular incident, so it cannot ground a
+ * claim. */
+export const GITHUB_OBJECT_TYPES = ['pull_request', 'commit', 'issue'] as const;
+
+export type GithubObjectType = (typeof GITHUB_OBJECT_TYPES)[number];
+
+const GITHUB_REPO = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
+const GITHUB_COMMIT_SHA = /^[0-9a-f]{40}$/;
+const GITHUB_OBJECT_NUMBER = /^[1-9][0-9]{0,19}$/;
+const GITHUB_OBJECT_REF = /^(pull_request|commit|issue):([0-9a-zA-Z]{1,40})$/;
+
+/** A full commit sha or an issue/pull number, normalized to the exact string
+ * the database stores. An abbreviated sha is not accepted: it is ambiguous
+ * within a large repository and cannot be re-resolved later. */
+export function canonicalGithubObjectId(type: GithubObjectType, value: unknown): string | null {
+  const candidate = typeof value === 'number' ? String(value) : String(value ?? '');
+  if (type === 'commit') {
+    const sha = candidate.toLowerCase();
+    return GITHUB_COMMIT_SHA.test(sha) ? sha : null;
+  }
+  return GITHUB_OBJECT_NUMBER.test(candidate) ? candidate : null;
+}
+
+export function canonicalGithubRepo(value: unknown): string | null {
+  const repo = String(value ?? '');
+  return GITHUB_REPO.test(repo) ? repo : null;
+}
+
+/** A reference is the object kind and the provider identifier together. `#42`
+ * is ambiguous across pull requests and issues, so the kind travels with the
+ * number. The repository is not part of the reference: it comes from the run's
+ * own collection, never from model output. */
+export function canonicalGithubObjectRef(value: unknown): string | null {
+  const match = GITHUB_OBJECT_REF.exec(typeof value === 'string' ? value : '');
+  if (!match) return null;
+  const type = match[1] as GithubObjectType;
+  const id = canonicalGithubObjectId(type, match[2]);
+  return id ? `${type}:${id}` : null;
+}
+
+function githubObjectRefs(value: unknown, allowed: ReadonlySet<string>): string[] {
+  const unique = new Set<string>();
+  for (const candidate of array(value)) {
+    const ref = canonicalGithubObjectRef(candidate);
+    if (!ref || !allowed.has(ref)) continue;
+    unique.add(ref);
+    if (unique.size >= OUTPUT_LIMITS.githubObjectRefs) break;
+  }
+  return [...unique];
+}
+
 function groundedAccountIdentityKeys(
   citedSessions: readonly string[],
   accountsBySession: ReadonlyMap<string, string>
@@ -174,6 +229,7 @@ export function sanitizeModelOutput(
     allowedSessionIds: Iterable<string>;
     allowedAccountIdentityKeys: Iterable<string>;
     allowedSentryIssueIds: Iterable<string>;
+    allowedGithubObjectRefs?: Iterable<string>;
     sessionAccountIdentityKeys?: Iterable<readonly [string, string]>;
   }
 ): CleanOutput {
@@ -193,6 +249,12 @@ export function sanitizeModelOutput(
     Array.from(options.allowedSentryIssueIds).flatMap((value) => {
       const id = canonicalSentryIssueId(value);
       return id ? [id] : [];
+    })
+  );
+  const allowedGithubObjectRefs = new Set(
+    Array.from(options.allowedGithubObjectRefs ?? []).flatMap((value) => {
+      const ref = canonicalGithubObjectRef(value);
+      return ref ? [ref] : [];
     })
   );
   const accountsBySession = new Map<string, string>();
@@ -223,6 +285,7 @@ export function sanitizeModelOutput(
       session_ids: groundedSessionIds,
       account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
       sentry_issue_ids: sentryIssueIds(note.sentry_issue_ids, allowedSentryIssueIds),
+      github_object_refs: githubObjectRefs(note.github_object_refs, allowedGithubObjectRefs),
       root_cause_hypothesis: text(note.root_cause_hypothesis, 1000),
       severity: SEVERITIES.has(String(note.severity ?? '')) ? String(note.severity) : 'medium',
       fingerprint,
@@ -256,6 +319,7 @@ export function sanitizeModelOutput(
       session_ids: groundedSessionIds,
       account_identity_keys: groundedAccountIdentityKeys(groundedSessionIds, accountsBySession),
       sentry_issue_ids: sentryIssueIds(item.sentry_issue_ids, allowedSentryIssueIds),
+      github_object_refs: githubObjectRefs(item.github_object_refs, allowedGithubObjectRefs),
       fingerprint: text(item.fingerprint, 120),
       incident_fingerprint: allowedIncidentFingerprints.has(text(item.incident_fingerprint, 120))
         ? text(item.incident_fingerprint, 120)

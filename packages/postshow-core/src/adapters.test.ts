@@ -240,7 +240,10 @@ describe('bounded connector gathering', () => {
       merged_at: '2100-01-01T00:00:00Z',
       updated_at: '2100-01-01T00:00:00Z',
     }));
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(json(rows));
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json(rows))
+      .mockResolvedValueOnce(json([]))
+      .mockResolvedValueOnce(json([]));
 
     const result = await githubGather(
       { repo: 'eventools-io/postshow' },
@@ -251,6 +254,109 @@ describe('bounded connector gathering', () => {
 
     expect(result.data).toHaveLength(100);
     expect(result.completeness).toMatchObject({ complete: false, returned: 100 });
+    expect(result.completeness.reason).toContain('pull requests exceeded');
+  });
+
+  it('turns merged pulls, commits, and issues into citable objects inside one window', async () => {
+    const mergedAt = new Date(Date.now() - 3600_000).toISOString();
+    const committedAt = new Date(Date.now() - 7200_000).toISOString();
+    const issueUpdatedAt = new Date(Date.now() - 1800_000).toISOString();
+    const sha = 'a'.repeat(40);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        json([{ number: 42, title: 'Fix invoice totals', merged_at: mergedAt }])
+      )
+      .mockResolvedValueOnce(
+        json([{ sha, commit: { message: 'Fix invoice totals', committer: { date: committedAt } } }])
+      )
+      .mockResolvedValueOnce(json([{ number: 7, title: 'Totals are wrong', updated_at: issueUpdatedAt }]));
+
+    const result = await githubGather(
+      { repo: 'eventools-io/postshow' },
+      { token: 'github_pat_test' },
+      7
+    );
+
+    expect(result.repo).toBe('eventools-io/postshow');
+    expect(result.completeness.complete).toBe(true);
+    expect(result.objects).toEqual([
+      {
+        type: 'pull_request',
+        id: '42',
+        title: 'Fix invoice totals',
+        url: 'https://github.com/eventools-io/postshow/pull/42',
+        lastSeen: mergedAt,
+      },
+      {
+        type: 'commit',
+        id: sha,
+        title: 'Fix invoice totals',
+        url: `https://github.com/eventools-io/postshow/commit/${sha}`,
+        lastSeen: committedAt,
+      },
+      {
+        type: 'issue',
+        id: '7',
+        title: 'Totals are wrong',
+        url: 'https://github.com/eventools-io/postshow/issues/7',
+        lastSeen: issueUpdatedAt,
+      },
+    ]);
+    expect(Date.parse(result.window.until) - Date.parse(result.window.since)).toBe(7 * 86400_000);
+  });
+
+  it('drops GitHub rows that cannot be named or placed in time, and never cites a pull twice', async () => {
+    const updatedAt = new Date(Date.now() - 600_000).toISOString();
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json([{ number: 9, title: 'Merged', merged_at: updatedAt }]))
+      .mockResolvedValueOnce(
+        json([
+          { sha: 'abc123', commit: { message: 'abbreviated sha', committer: { date: updatedAt } } },
+          { sha: 'b'.repeat(40), commit: { message: 'no committer date' } },
+        ])
+      )
+      // The issues endpoint returns pull requests too. Citing #9 as both a
+      // pull request and an issue would let one object answer twice.
+      .mockResolvedValueOnce(
+        json([
+          { number: 9, title: 'Merged', updated_at: updatedAt, pull_request: { url: 'x' } },
+          { number: 0, title: 'zero is not an issue number', updated_at: updatedAt },
+        ])
+      );
+
+    const result = await githubGather(
+      { repo: 'eventools-io/postshow' },
+      { token: 'github_pat_test' },
+      7
+    );
+
+    expect(result.objects.map((object) => `${object.type}:${object.id}`)).toEqual([
+      'pull_request:9',
+    ]);
+  });
+
+  it('redacts provider-authored GitHub titles before the packet sees them', async () => {
+    const updatedAt = new Date(Date.now() - 600_000).toISOString();
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(json([]))
+      .mockResolvedValueOnce(json([]))
+      .mockResolvedValueOnce(
+        json([
+          {
+            number: 11,
+            title: 'Crash for dana.reyes@northwind-labs.test in /Users/dana/app.ts',
+            updated_at: updatedAt,
+          },
+        ])
+      );
+
+    const result = await githubGather(
+      { repo: 'eventools-io/postshow' },
+      { token: 'github_pat_test' },
+      7
+    );
+
+    expect(result.objects[0]?.title).toBe('Crash for :email in /Users/:user/app.ts');
   });
 
   it('reports a Sentry cursor cap and rejects pagination to another origin', async () => {

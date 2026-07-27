@@ -121,6 +121,13 @@ function harness(initialJobs: GatewayJob[] = [job(1)]) {
       completeness: { complete: true, sampled: false, returned: 0, available: 0 },
     })),
     githubGather: vi.fn(async () => ({
+      repo: 'northwind-labs/invoice-web',
+      window: {
+        days: 1,
+        since: '2026-07-21T00:00:00.000Z',
+        until: '2026-07-22T00:00:00.000Z',
+      },
+      objects: [],
       data: [],
       completeness: { complete: true, sampled: false, returned: 0, available: 0 },
     })),
