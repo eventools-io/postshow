@@ -33,7 +33,7 @@
     "@electron/asar": "3.4.1",
     "@eventools/config": "workspace:*",
     "@eventools/postshow-core": "workspace:*",
-    "@types/node": "^22.10.2",
+    "@types/node": "^26.1.1",
     "electron": "^43.1.1",
     "electron-builder": "^26.0.12",
     "resedit": "1.7.2",
