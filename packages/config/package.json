@@ -17,7 +17,7 @@
     "prettier.config.js"
   ],
   "devDependencies": {
-    "@types/node": "^22.10.5",
+    "@types/node": "^26.1.1",
     "@typescript-eslint/eslint-plugin": "^8.19.1",
     "@typescript-eslint/parser": "^8.19.1",
     "@vitejs/plugin-react": "^4.3.4",
