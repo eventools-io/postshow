@@ -5,6 +5,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AccountDeletionSection } from './AccountDeletionSection';
 import { deletePostshowAccount } from '@/lib/accountDeletion';
 import { PostshowFunctionError } from '@/lib/functionClient';
+import { track } from '@/lib/analytics';
 
 const auth = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
@@ -12,6 +13,7 @@ const auth = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/supabase', () => ({ supabase: { auth } }));
+vi.mock('@/lib/analytics', () => ({ track: vi.fn() }));
 vi.mock('@/lib/accountDeletion', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/accountDeletion')>();
   return { ...actual, deletePostshowAccount: vi.fn() };
@@ -21,6 +23,7 @@ const remove = vi.fn();
 const click = vi.fn();
 const createElement = document.createElement.bind(document);
 const deleteAccount = vi.mocked(deletePostshowAccount);
+const trackEvent = vi.mocked(track);
 const session = {
   access_token: 'old-jwt',
   refresh_token: 'refresh',
@@ -51,6 +54,7 @@ describe('AccountDeletionSection', () => {
     });
     auth.signOut.mockReset().mockResolvedValue({ error: null });
     deleteAccount.mockReset();
+    trackEvent.mockReset();
     click.mockReset();
     remove.mockReset();
     vi.stubGlobal('URL', {
@@ -102,6 +106,7 @@ describe('AccountDeletionSection', () => {
     expect(deleteAccount).toHaveBeenCalledWith('person@example.com', 'fresh-jwt');
     expect(await screen.findByText(/account deletion confirmed/i)).toBeInTheDocument();
     expect(click).toHaveBeenCalledTimes(1);
+    expect(trackEvent).toHaveBeenCalledExactlyOnceWith('account_deleted');
   });
 
   it('uses a current fresh non-password session without forcing a password sign-in', async () => {
@@ -147,6 +152,7 @@ describe('AccountDeletionSection', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/transfer each workspace/i);
     expect(screen.getByRole('alert')).not.toHaveTextContent(/provider detail/i);
+    expect(trackEvent).not.toHaveBeenCalled();
   });
 
   it('reuses the same fresh token for authoritative lost-response readback', async () => {
