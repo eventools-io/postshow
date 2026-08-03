@@ -34,7 +34,7 @@
     "@eventools/config": "workspace:*",
     "@eventools/postshow-core": "workspace:*",
     "@types/node": "^22.10.2",
-    "electron": "^43.1.1",
+    "electron": "^43.2.0",
     "electron-builder": "^26.0.12",
     "resedit": "1.7.2",
     "tsup": "^8.3.5",
