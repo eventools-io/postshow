@@ -591,6 +591,12 @@ export async function githubRecentPrs(
 
 const GITHUB_PULL_PAGE_CAP = 10;
 const GITHUB_OBJECT_PAGE_CAP = 5;
+/** The gateway refuses a `github_source` carrying more objects than this, and it
+ * refuses the whole submission rather than trimming it, so a repository busy
+ * enough to exceed the cap would lose its entire run. The page caps above allow
+ * roughly 2000 objects between them, so the collector has to stop here itself.
+ * This is `GITHUB_OBJECT_CAP` in the managed gateway; the two move together. */
+const GITHUB_OBJECT_SUBMISSION_CAP = 500;
 
 /** Deep links are built from the validated repository and identifier this run
  * collected, never from a URL the provider or the model handed us. */
@@ -677,6 +683,13 @@ export async function githubGather(
     if (!id || !seenAt) return;
     const key = `${type}:${id}`;
     if (seen.has(key)) return;
+    // Stopping at the cap keeps the submission valid and reports the collection
+    // as partial, which is honest. Collecting past it would have the gateway
+    // reject every object including the ones under the limit.
+    if (objects.length >= GITHUB_OBJECT_SUBMISSION_CAP) {
+      incompleteReasons.add('object cap reached');
+      return;
+    }
     seen.add(key);
     objects.push({
       type,
