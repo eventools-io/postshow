@@ -28,19 +28,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@napi-rs/keyring": "1.3.0",
     "postgres": "^3.4.9",
-    "undici": "^7.28.0",
-    "zod": "^3.25.28"
+    "undici": "^7.29.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@eventools/config": "workspace:*",
     "@eventools/postshow-core": "workspace:*",
-    "@types/node": "^22.10.2",
-    "tsup": "^8.3.5",
-    "typescript": "^5.7.2",
-    "vitest": "^3.2.6"
+    "@types/node": "^22.20.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
   },
   "exports": {
     "./lib": {
