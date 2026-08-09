@@ -31,6 +31,8 @@ pnpm test
 
 No hosted Postshow credentials are required for the unit-test suite. Tests must use synthetic fixtures or fully scrubbed recordings from a maintainer-owned test account, never customer or production captures.
 
+To run the web app against a local Supabase instance, copy `apps/postshow/.env.example` to `apps/postshow/.env`. Environment files are ignored and must stay that way: this repository is published, so a value committed here is a value published.
+
 ## Work on one surface
 
 | Area          | Development command                                 | Test command                                     |

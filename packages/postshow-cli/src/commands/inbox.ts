@@ -48,8 +48,26 @@ const inboxDependencies: InboxDependencies = {
   say,
 };
 
-export function buildInboxReviewUrl(workspaceId: string, itemId: string): string {
-  const url = new URL('/inbox', 'https://postshow.io');
+export const HOSTED_REVIEW_ORIGIN = 'https://postshow.io';
+
+/** The review link has to point at the deployment the caller is actually
+ * talking to. A self-hosted workspace sent to the hosted origin is a link to
+ * someone else's product, so the origin is derived from the configured gateway
+ * and only falls back to the hosted app when the gateway is the hosted one. */
+export function inboxReviewOrigin(apiUrl: string): string {
+  if (!apiUrl) return HOSTED_REVIEW_ORIGIN;
+  let gateway: URL;
+  try {
+    gateway = new URL(apiUrl);
+  } catch {
+    return HOSTED_REVIEW_ORIGIN;
+  }
+  if (gateway.hostname.endsWith('.supabase.co')) return HOSTED_REVIEW_ORIGIN;
+  return gateway.origin;
+}
+
+export function buildInboxReviewUrl(workspaceId: string, itemId: string, apiUrl = ''): string {
+  const url = new URL('/inbox', inboxReviewOrigin(apiUrl));
   if (workspaceId) url.searchParams.set('workspace', workspaceId);
   url.searchParams.set('item', itemId);
   return url.href;
@@ -163,7 +181,7 @@ export async function inboxReview(
   const item = await resolvePendingItem(config, prefix, dependencies);
   if (!item) return 1;
   dependencies.say('Review and confirm this action in your authenticated browser:');
-  dependencies.say(buildInboxReviewUrl(config.workspaceId, item.id));
+  dependencies.say(buildInboxReviewUrl(config.workspaceId, item.id, config.apiUrl));
   dependencies.dim(
     'The CLI cannot execute inbox actions. The web preview binds the exact destination and revision.'
   );

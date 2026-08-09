@@ -182,10 +182,100 @@ describe('bounded connector gathering', () => {
 
     const result = await stripeGather({ api_key: 'rk_test' });
 
-    expect(result.completeness.complete).toBe(true);
+    // The account is still returned, but an item carrying no price at all has
+    // no amount to read, and reporting that as zero exposure would be a
+    // fabricated measurement rather than a missing one.
+    expect(result.completeness.complete).toBe(false);
     expect(result.data).toEqual([
-      expect.objectContaining({ customerId: 'cus_1', subscriptionId: 'sub_1', mrrCents: 0 }),
+      expect.objectContaining({ customerId: 'cus_1', subscriptionId: 'sub_1', mrrCents: null }),
     ]);
+  });
+
+  it('reports no amount for a tiered price instead of a fabricated zero', async () => {
+    // Stripe leaves both amount fields null whenever billing_scheme is not
+    // per_unit, with the money in tiers. These are usually the largest accounts
+    // in a usage-priced product.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      json({
+        data: [
+          {
+            id: 'sub_tiered',
+            status: 'active',
+            customer: { id: 'cus_tiered', name: 'Usage priced' },
+            items: {
+              data: [
+                {
+                  id: 'si_tiered',
+                  quantity: 1,
+                  price: {
+                    currency: 'usd',
+                    billing_scheme: 'tiered',
+                    unit_amount: null,
+                    unit_amount_decimal: null,
+                    recurring: { interval: 'month', interval_count: 1 },
+                  },
+                },
+              ],
+              has_more: false,
+            },
+          },
+        ],
+        has_more: false,
+      })
+    );
+
+    const result = await stripeGather({ api_key: 'rk_test' });
+
+    expect(result.data).toEqual([
+      expect.objectContaining({ customerId: 'cus_tiered', mrrCents: null }),
+    ]);
+    expect(result.completeness.complete).toBe(false);
+    expect(result.completeness.reason).toContain('tiered');
+  });
+
+  it('does not partially total a subscription that mixes tiered and per-unit items', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      json({
+        data: [
+          {
+            id: 'sub_mixed',
+            status: 'active',
+            customer: { id: 'cus_mixed', name: 'Mixed' },
+            items: {
+              data: [
+                {
+                  id: 'si_flat',
+                  quantity: 1,
+                  price: {
+                    currency: 'usd',
+                    unit_amount: 5000,
+                    recurring: { interval: 'month', interval_count: 1 },
+                  },
+                },
+                {
+                  id: 'si_metered',
+                  quantity: 1,
+                  price: {
+                    currency: 'usd',
+                    billing_scheme: 'tiered',
+                    unit_amount: null,
+                    recurring: { interval: 'month', interval_count: 1 },
+                  },
+                },
+              ],
+              has_more: false,
+            },
+          },
+        ],
+        has_more: false,
+      })
+    );
+
+    const result = await stripeGather({ api_key: 'rk_test' });
+
+    // $50 is the floor of this account's exposure, not its exposure. Reporting
+    // it would understate the largest customers as confidently as a zero did.
+    expect(result.data).toEqual([expect.objectContaining({ mrrCents: null })]);
   });
 
   it('reports a Stripe list cap instead of silently returning a partial account set', async () => {

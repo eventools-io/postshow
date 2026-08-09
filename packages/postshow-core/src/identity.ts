@@ -66,6 +66,12 @@ interface AccountGroup {
 
 interface AccountGroups {
   groups: AccountGroup[];
+  /** Every normalized email seen, mapped to every account carrying it, built
+   * before the cap is applied. Two customers sharing an email collide whether
+   * or not both survive truncation, and deciding confidence from the survivors
+   * alone turned a hidden collision into a confident link to whichever account
+   * the provider happened to list first. */
+  emailAccounts: Map<string, Set<string>>;
   rejectedSourceIds: number;
   truncatedAccountGroups: number;
 }
@@ -92,8 +98,17 @@ function stripeAccountGroups(stripe: GatherResult<StripeAccount[]> | null): Acco
     groups.set(customerId, group);
   }
   const allGroups = [...groups.values()];
+  const emailAccounts = new Map<string, Set<string>>();
+  for (const group of allGroups) {
+    for (const email of group.emails) {
+      const identities = emailAccounts.get(email) ?? new Set<string>();
+      identities.add(`stripe:${group.customerId}`);
+      emailAccounts.set(email, identities);
+    }
+  }
   return {
     groups: allGroups.slice(0, 200),
+    emailAccounts,
     rejectedSourceIds,
     truncatedAccountGroups: Math.max(0, allGroups.length - 200),
   };
@@ -105,11 +120,20 @@ export function stripeSourceAccounts(
 ): SourceAccountSnapshot[] {
   return stripeAccountGroups(stripe).groups.map((group) => {
     const mrrByCurrency: Record<string, number> = {};
+    // A currency holding even one subscription whose amount is not computable
+    // has no total worth reporting. Summing the rest would present a number
+    // that is confidently short of the real exposure.
+    const incomputableCurrencies = new Set<string>();
     for (const subscription of group.subscriptions) {
       const currency = subscription.currency.toUpperCase();
       if (!/^[A-Z]{3}$/.test(currency)) continue;
+      if (subscription.mrrCents === null) {
+        incomputableCurrencies.add(currency);
+        continue;
+      }
       mrrByCurrency[currency] = (mrrByCurrency[currency] ?? 0) + subscription.mrrCents;
     }
+    for (const currency of incomputableCurrencies) delete mrrByCurrency[currency];
     const currencies = Object.keys(mrrByCurrency).sort();
     const subscriptionIds = group.subscriptions.map((row) => row.subscriptionId);
     const email = group.emails.size === 1 ? [...group.emails][0] : undefined;
@@ -126,7 +150,10 @@ export function stripeSourceAccounts(
         ? 'past_due'
         : (group.subscriptions[0]?.status ?? 'active'),
       statusTone: group.subscriptions.some((row) => row.status === 'past_due') ? 'bad' : 'good',
-      mrrCents: currencies.length === 1 ? mrrByCurrency[currencies[0]!]! : null,
+      mrrCents:
+        currencies.length === 1 && incomputableCurrencies.size === 0
+          ? mrrByCurrency[currencies[0]!]!
+          : null,
       currency: currencies.length === 1 ? currencies[0]! : '',
       mrrByCurrency,
     };
@@ -146,7 +173,10 @@ export function sourceIdentityContext(
   stripe: GatherResult<StripeAccount[]> | null
 ): SourceIdentityContext {
   const grouped = stripeAccountGroups(stripe);
-  const accountsByEmail = new Map<string, Set<string>>();
+  // Every ambiguity check below reads this map, which was built across all
+  // accounts rather than the ones that survived the cap.
+  const accountsByEmail = grouped.emailAccounts;
+  const retainedAccounts = new Set(grouped.groups.map((group) => `stripe:${group.customerId}`));
   const links: SourceIdentityLink[] = [];
   for (const group of grouped.groups) {
     const accountIdentityKey = `stripe:${group.customerId}`;
@@ -166,18 +196,17 @@ export function sourceIdentityContext(
         confidence: 1,
       });
     }
-    for (const email of group.emails) {
-      const identities = accountsByEmail.get(email) ?? new Set<string>();
-      identities.add(accountIdentityKey);
-      accountsByEmail.set(email, identities);
-    }
   }
 
   const ambiguousEmails = [...accountsByEmail.values()].filter((ids) => ids.size > 1).length;
   for (const [email, accounts] of accountsByEmail) {
     if (accounts.size !== 1) continue;
+    // The one account this email resolves to may itself have been truncated
+    // away, and a link to an account the run never carried is not usable.
+    const accountIdentityKey = [...accounts][0]!;
+    if (!retainedAccounts.has(accountIdentityKey)) continue;
     links.push({
-      accountIdentityKey: [...accounts][0]!,
+      accountIdentityKey,
       provider: 'email',
       identityType: 'email',
       externalId: email,
@@ -193,7 +222,12 @@ export function sourceIdentityContext(
     const email = normalizedEmail(sample.email);
     const distinctId = exactSourceId(sample.distinctId);
     const accounts = email ? accountsByEmail.get(email) : undefined;
-    if (!sessionId || !distinctId || accounts?.size !== 1) {
+    if (
+      !sessionId ||
+      !distinctId ||
+      accounts?.size !== 1 ||
+      !retainedAccounts.has([...accounts][0]!)
+    ) {
       unmatchedSessions += 1;
       continue;
     }

@@ -352,7 +352,10 @@ export interface StripeAccount {
   name: string;
   email: string;
   status: string;
-  mrrCents: number;
+  /** Null when the subscription's price does not carry a computable per-unit
+   * amount, which is every tiered price. Reporting a wrong exposure is worse
+   * than reporting none, so this is never coerced to zero. */
+  mrrCents: number | null;
   currency: string;
 }
 
@@ -448,7 +451,10 @@ export async function stripeGather(
       const customer = stripeObject(sub.customer);
       const customerId = String(customer.id ?? sub.customer ?? '');
       if (!customerId.startsWith('cus_')) continue;
-      let mrr = 0;
+      // Null once any item on the subscription prices in a scheme this cannot
+      // total, and it stays null: a partial sum over the remaining items would
+      // understate the exposure as confidently as a zero would.
+      let mrr: number | null = 0;
       let currency = '';
       const itemResult = await stripeItems(key, sub, maxChildPages);
       if (!itemResult.completeness.complete && itemResult.completeness.reason) {
@@ -460,7 +466,21 @@ export async function stripeGather(
         const itemCurrency = String(price.currency ?? '').toUpperCase();
         if (currency && itemCurrency && itemCurrency !== currency) continue;
         currency ||= itemCurrency;
-        const unitAmount = Number(price.unit_amount_decimal ?? price.unit_amount ?? 0);
+        // Stripe leaves both amount fields null whenever the price is not
+        // per-unit, with the money in `tiers` instead. Reading through to zero
+        // presented a fabricated exposure as a measured one, and did it for the
+        // usage-priced accounts that are usually the largest.
+        const billingScheme = String(price.billing_scheme ?? 'per_unit');
+        const rawAmount = price.unit_amount_decimal ?? price.unit_amount ?? null;
+        if (billingScheme !== 'per_unit' || rawAmount === null) {
+          mrr = null;
+          incompleteReasons.add(
+            `subscription ${sub.id} prices with ${billingScheme} billing, so its amount is not computable here`
+          );
+          continue;
+        }
+        if (mrr === null) continue;
+        const unitAmount = Number(rawAmount);
         const quantity = Number(item.quantity ?? 1);
         const intervalCount = Math.max(1, Number(recurring.interval_count ?? 1));
         if (!Number.isFinite(unitAmount) || !Number.isFinite(quantity) || quantity < 0) continue;
@@ -486,7 +506,7 @@ export async function stripeGather(
         name: String(customer.name || customer.email || `customer ${sub.customer}`),
         email: String(customer.email || ''),
         status: String(sub.status),
-        mrrCents: Math.max(0, Math.round(mrr)),
+        mrrCents: mrr === null ? null : Math.max(0, Math.round(mrr)),
         currency: currency || 'USD',
       });
     }
@@ -1175,16 +1195,28 @@ export function packetSections(input: {
   }
   const stripe = normalizeArrayGather(input.stripe);
   if (stripe) {
+    // Accounts with no computable amount sort first rather than last. They are
+    // usually the usage-priced ones, so ordering them by a missing number would
+    // drop the largest customers out of the packet entirely.
     const presented = [...stripe.data]
-      .sort((left, right) => right.mrrCents - left.mrrCents)
+      .sort((left, right) => {
+        if (left.mrrCents === null || right.mrrCents === null) {
+          return Number(left.mrrCents !== null) - Number(right.mrrCents !== null);
+        }
+        return right.mrrCents - left.mrrCents;
+      })
       .slice(0, 50);
     sections.push(
       completenessSummary('stripe subscriptions', stripe.completeness, presented.length),
-      `REVENUE (stripe subscriptions; highest MRR first):\n${
+      `REVENUE (stripe subscriptions; highest MRR first, amounts that are not computable first):\n${
         presented
           .map(
             (a) =>
-              `  [account_identity_key=stripe:${a.customerId}] ${a.name} · ${a.status} · ${a.currency} ${(a.mrrCents / 100).toFixed(0)}/mo`
+              `  [account_identity_key=stripe:${a.customerId}] ${a.name} · ${a.status} · ${
+                a.mrrCents === null
+                  ? 'MRR not computable from this price'
+                  : `${a.currency} ${(a.mrrCents / 100).toFixed(0)}/mo`
+              }`
           )
           .join('\n') || '  none'
       }`

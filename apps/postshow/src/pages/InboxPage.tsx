@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useWorkspace } from '@/state/WorkspaceContext';
 import {
   fetchInbox,
@@ -23,20 +23,31 @@ function ItemRow({
   canOperate,
   canApprove,
   replay,
+  focused,
   onChanged,
 }: {
   item: InboxItem;
   canOperate: boolean;
   canApprove: boolean;
   replay: PosthogReplayConfig | null;
+  focused: boolean;
   onChanged: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(focused);
+  const rowRef = useRef<HTMLLIElement>(null);
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(item.body);
   const [busy, setBusy] = useState<'approve' | 'skip' | 'save' | null>(null);
   const [error, setError] = useState('');
   const [approval, setApproval] = useState<ActionPreview | null>(null);
+
+  // The CLI and MCP surfaces hand a person a link to one exact item. Landing on
+  // a list that does not say which one was meant is how the wrong action gets
+  // reviewed.
+  useEffect(() => {
+    if (!focused) return;
+    rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focused]);
 
   useEffect(() => {
     if (!canOperate) {
@@ -113,7 +124,10 @@ function ItemRow({
   const actionable = item.action_type !== 'none';
 
   return (
-    <li className="ps-card flex flex-col gap-3 p-5">
+    <li
+      ref={rowRef}
+      className={`ps-card flex flex-col gap-3 p-5${focused ? ' border-signal' : ''}`}
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
         <div className="min-w-0">
           <p className="m-0 font-public-mono text-[10px] font-medium uppercase tracking-[0.14em] text-signal">
@@ -311,6 +325,8 @@ function ItemRow({
 export function InboxPage() {
   const { workspace } = useWorkspace();
   const workspaceId = workspace?.id ?? '';
+  const [searchParams] = useSearchParams();
+  const focusedItemId = searchParams.get('item') ?? '';
   const fetcher = useCallback(() => fetchInbox(workspaceId), [workspaceId]);
   const { data, loading, error, reload } = usePageData(fetcher);
   const replayFetcher = useCallback(() => fetchPosthogReplayConfig(workspaceId), [workspaceId]);
@@ -384,6 +400,7 @@ export function InboxPage() {
               canOperate={canOperate}
               canApprove={canApprove}
               replay={replay}
+              focused={item.id === focusedItemId}
               onChanged={reload}
             />
           ))}

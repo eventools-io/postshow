@@ -18,11 +18,14 @@ function json(payload: unknown) {
 
 const MCP_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-export function mcpReviewHandoff(config: Pick<CliConfig, 'workspaceId'>, itemId: string) {
+export function mcpReviewHandoff(
+  config: Pick<CliConfig, 'workspaceId' | 'apiUrl'>,
+  itemId: string
+) {
   if (!MCP_UUID_RE.test(itemId)) throw new Error('a valid inbox item id is required');
   return {
     item_id: itemId,
-    review_url: buildInboxReviewUrl(config.workspaceId, itemId),
+    review_url: buildInboxReviewUrl(config.workspaceId, itemId, config.apiUrl),
     requires_authenticated_browser: true,
     executed: false,
   };

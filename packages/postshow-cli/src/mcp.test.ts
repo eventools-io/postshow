@@ -4,7 +4,10 @@ import { mcpReviewHandoff, mcpSkipArgs } from './mcp';
 describe('MCP inbox safety boundary', () => {
   it('returns a token-free authenticated web handoff instead of an execution request', () => {
     const handoff = mcpReviewHandoff(
-      { workspaceId: '10000000-0000-4000-8000-000000000001' },
+      {
+        workspaceId: '10000000-0000-4000-8000-000000000001',
+        apiUrl: 'https://project.supabase.co/functions/v1/postshow-api',
+      },
       '00000000-0000-4000-8000-000000000001'
     );
 
@@ -17,6 +20,20 @@ describe('MCP inbox safety boundary', () => {
     });
     expect(handoff).not.toHaveProperty('token');
     expect(handoff).not.toHaveProperty('confirmation_token');
+  });
+
+  // A self-hosted workspace reviewing on the hosted app would be reviewing
+  // somebody else's inbox.
+  it('sends a self-hosted gateway to its own review surface', () => {
+    const handoff = mcpReviewHandoff(
+      {
+        workspaceId: '10000000-0000-4000-8000-000000000001',
+        apiUrl: 'https://postshow.internal.example/functions/v1/postshow-api',
+      },
+      '00000000-0000-4000-8000-000000000001'
+    );
+
+    expect(handoff.review_url.startsWith('https://postshow.internal.example/inbox?')).toBe(true);
   });
 
   it('maps the exact listed action revision to the cloud skip contract', () => {

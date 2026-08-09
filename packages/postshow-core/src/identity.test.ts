@@ -165,3 +165,78 @@ describe('source identity context', () => {
     });
   });
 });
+
+describe('account truncation and identity confidence', () => {
+  function account(index: number, email: string): StripeAccount {
+    return {
+      customerId: `cus_${String(index).padStart(4, '0')}`,
+      subscriptionId: `sub_${String(index).padStart(4, '0')}`,
+      name: `Customer ${index}`,
+      email,
+      status: 'active',
+      mrrCents: 1000,
+      currency: 'USD',
+    };
+  }
+
+  // The cap keeps the packet bounded, but it used to be applied before the
+  // ambiguity checks, so a collision whose second account fell outside the cap
+  // was invisible and the survivor got a confidence-1 link on a shared email.
+  it('sees an email collision hidden behind the account cap', () => {
+    const accounts = [
+      account(1, 'shared@example.test'),
+      ...Array.from({ length: 210 }, (_, offset) => account(offset + 2, `u${offset}@example.test`)),
+      account(500, 'shared@example.test'),
+    ];
+
+    const context = sourceIdentityContext(null, stripeResult(accounts));
+
+    expect(context.completeness.truncatedAccountGroups).toBeGreaterThan(0);
+    expect(context.completeness.ambiguousEmails).toBe(1);
+    expect(
+      context.links.filter(
+        (link) => link.provider === 'email' && link.externalId === 'shared@example.test'
+      )
+    ).toEqual([]);
+  });
+
+  it('still links an unambiguous email that survived the cap', () => {
+    const accounts = Array.from({ length: 210 }, (_, offset) =>
+      account(offset + 1, `u${offset}@example.test`)
+    );
+
+    const context = sourceIdentityContext(null, stripeResult(accounts));
+
+    expect(context.links).toContainEqual(
+      expect.objectContaining({ provider: 'email', externalId: 'u0@example.test', confidence: 1 })
+    );
+  });
+
+  // A link naming an account the run never carried cannot be acted on.
+  it('does not link an email whose only account was truncated away', () => {
+    const accounts = [
+      ...Array.from({ length: 205 }, (_, offset) => account(offset + 1, `u${offset}@example.test`)),
+    ];
+
+    const context = sourceIdentityContext(null, stripeResult(accounts));
+    const linkedKeys = new Set(context.links.map((link) => link.accountIdentityKey));
+
+    expect(linkedKeys.has('stripe:cus_0205')).toBe(false);
+    expect(
+      context.links.some(
+        (link) => link.provider === 'email' && link.externalId === 'u204@example.test'
+      )
+    ).toBe(false);
+  });
+
+  it('reports no revenue for an account whose amount is not computable', () => {
+    const snapshots = stripeSourceAccounts(
+      stripeResult([
+        { ...account(1, 'a@example.test'), mrrCents: 5000 },
+        { ...account(1, 'a@example.test'), subscriptionId: 'sub_metered', mrrCents: null },
+      ])
+    );
+
+    expect(snapshots[0]?.mrrCents).toBeNull();
+  });
+});

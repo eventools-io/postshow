@@ -15,8 +15,19 @@ import type { GatherCompleteness } from './adapters';
  * work. Code context still reports its status and its gap; it no longer decides.
  * Sentry stays blocking, because a returned error group is a candidate cause. A
  * v3 ledger could record a `code_context_not_linked` decision that v4 cannot
- * reach, so it is not readable as a v4 decision. */
-export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v4';
+ * reach, so it is not readable as a v4 decision.
+ *
+ * v5 separated a source that failed from a source that had nothing to say.
+ * Through v4 a collection error collapsed to zero returned records, which read
+ * as `missing`, the same status as a workspace that never connected the source.
+ * Only `not_linked` diverted the decision, so a Sentry gather that timed out let
+ * an incident reach `act` while a Sentry gather that succeeded and returned
+ * uncited issues held it at `gather_more`. Failing made the policy more willing
+ * to act, exactly during a provider outage, when incidents cluster. A failed
+ * collection now reports `unavailable` and blocks on its own reason code. A v4
+ * ledger could record an `act` that v5 cannot reach, so it is not readable as a
+ * v5 decision. */
+export const INCIDENT_EVIDENCE_POLICY_VERSION = 'incident-evidence-v5';
 export const SOURCE_EVIDENCE_CONTEXT_VERSION = 1 as const;
 
 export const INCIDENT_EVIDENCE_SOURCES = ['posthog', 'stripe', 'sentry', 'github'] as const;

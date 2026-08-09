@@ -6,3 +6,9 @@ out/
 .DS_Store
 test-results/
 playwright-report/
+
+# Environment files never enter the tree. This repository is published, and a
+# local-only value today is a production value after one careless edit.
+.env
+.env.*
+!.env.example
