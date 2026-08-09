@@ -73,6 +73,12 @@ export interface ReceiptVerification {
   /** A recovery check written after the result is known is not a prediction. A
    * receipt that claims recovery requires this to be true. */
   recorded_before_intervention: boolean;
+  /** Carried in the document, not merely used to derive the flag above. A
+   * verifier recomputes the ordering rather than trusting it, so a receipt that
+   * did not carry these timestamps could not prove its own recovery claim and
+   * would fail its own revalidation. */
+  recorded_at: string | null;
+  intervened_at: string | null;
   measure: string;
   window: string;
   threshold: string;
@@ -336,6 +342,8 @@ export function buildRecoveryReceipt(input: RecoveryReceiptInput): RecoveryRecei
     verification: {
       contract_recorded: contractRecorded,
       recorded_before_intervention: recordedBefore,
+      recorded_at: recordedAt,
+      intervened_at: intervenedAt,
       measure: text(contract.measure ?? '', 'receipt verification measure', 300, true),
       window: text(contract.window ?? '', 'receipt verification window', 120, true),
       threshold: text(contract.threshold ?? '', 'receipt verification threshold', 200, true),
@@ -419,11 +427,10 @@ export function normalizeRecoveryReceipt(value: unknown): RecoveryReceipt {
           window: verification.window,
           threshold: verification.threshold,
           guardrails: verification.guardrails,
-          // The projection recomputes ordering from these two, so a document
-          // that asserts it was recorded first has to carry the timestamps that
-          // prove it.
-          recorded_at: candidate.verification_recorded_at ?? null,
-          intervened_at: candidate.verification_intervened_at ?? null,
+          // The projection recomputes the ordering rather than trusting the
+          // flag, so it reads the timestamps the document itself carries.
+          recorded_at: verification.recorded_at ?? null,
+          intervened_at: verification.intervened_at ?? null,
         }
       : {},
     measured_outcome: outcome,

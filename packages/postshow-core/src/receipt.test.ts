@@ -232,16 +232,30 @@ describe('receipt canonicalization', () => {
 });
 
 describe('receipt revalidation', () => {
-  it('accepts a receipt this projection produced', () => {
+  // The document has to be self-contained. A verifier sees only the bytes that
+  // were signed, so anything the projection needs to recompute the recovery
+  // claim has to travel inside them.
+  it('round trips through its own canonical bytes with nothing alongside', () => {
     const receipt = buildRecoveryReceipt(input());
-    const carried = {
-      ...receipt,
-      verification_recorded_at: '2026-08-02T18:31:00.000Z',
-      verification_intervened_at: '2026-08-03T15:00:00.000Z',
-    };
-    expect(canonicalizeReceipt(normalizeRecoveryReceipt(carried))).toBe(
+    expect(receipt.claims_recovery).toBe(true);
+    const overTheWire = JSON.parse(canonicalizeReceipt(receipt));
+    expect(canonicalizeReceipt(normalizeRecoveryReceipt(overTheWire))).toBe(
       canonicalizeReceipt(receipt)
     );
+  });
+
+  it('round trips a receipt that withheld its impact detail', () => {
+    const receipt = buildRecoveryReceipt(input({ disclose_impact: false }));
+    const overTheWire = JSON.parse(canonicalizeReceipt(receipt));
+    expect(normalizeRecoveryReceipt(overTheWire).impact.disclosed).toBe(false);
+  });
+
+  it('round trips an inconclusive receipt', () => {
+    const receipt = buildRecoveryReceipt(
+      input({ measured_outcome: { status: 'inconclusive', baseline: '', observed: '' } })
+    );
+    const overTheWire = JSON.parse(canonicalizeReceipt(receipt));
+    expect(normalizeRecoveryReceipt(overTheWire).outcome.status).toBe('inconclusive');
   });
 
   // The attack this closes: take a real receipt for an inconclusive incident,
