@@ -74,7 +74,10 @@ describe('github connector fixtures', () => {
     const result = await gather();
 
     expect(result.repo).toBe(GITHUB_FIXTURE_META.repo);
-    expect(result.completeness).toMatchObject({ complete: true, returned: 1 });
+    // Three, matching the three citable objects asserted below, not the one
+    // merged pull request among them. The gateway reads this count to decide
+    // whether the run supplied code context at all.
+    expect(result.completeness).toMatchObject({ complete: true, returned: 3 });
     expect(result.window.days).toBe(GITHUB_FIXTURE_WINDOW_DAYS);
     expect(Date.parse(result.window.until) - Date.parse(result.window.since)).toBe(
       GITHUB_FIXTURE_WINDOW_DAYS * 86400_000

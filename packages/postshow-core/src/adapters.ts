@@ -757,7 +757,14 @@ export async function githubGather(
     window,
     objects,
     data: prs,
-    completeness: completeness(complete, prs.length, {
+    // `returned` is what reached the run and can be cited, which for GitHub is
+    // every collected object: merged pull requests, commits, and non-pull
+    // issues. Reporting prs.length instead understated it whenever a repository
+    // had commits or issues in the window but no merged pull request, and the
+    // gateway only counts code context as present when github.returned is above
+    // zero. A busy repository that merged nothing therefore submitted its
+    // objects and was still read as having supplied no code context.
+    completeness: completeness(complete, objects.length, {
       reason: complete ? undefined : [...incompleteReasons].join('; '),
     }),
   };
@@ -1242,7 +1249,10 @@ export function packetSections(input: {
     const presented = github.data.slice(0, 50);
     const citable = github.objects.slice(0, 50);
     sections.push(
-      completenessSummary('github merged pull requests', github.completeness, presented.length),
+      // The count this line reconciles against is the collected-object count,
+      // so the presented figure has to be the citable objects rather than the
+      // merged pull requests listed below it.
+      completenessSummary('github repository objects', github.completeness, citable.length),
       `RECENT MERGED PRS:\n${presented.map((pr) => `  #${pr.number} ${pr.title} (${pr.mergedAt})`).join('\n') || '  none'}`,
       `CITABLE ${github.repo} OBJECTS (code context; cite the bracketed ref verbatim):\n${
         citable
