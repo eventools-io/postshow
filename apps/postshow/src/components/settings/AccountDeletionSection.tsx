@@ -9,6 +9,7 @@ import {
 } from '@/lib/accountDeletion';
 import { PostshowFunctionError } from '@/lib/functionClient';
 import { destructiveAccessToken, REAUTHENTICATION_GUIDANCE } from '@/lib/destructiveAuth';
+import { track } from '@/lib/analytics';
 
 function downloadReceipt(receipt: AccountDeletionReceipt): void {
   const file = accountDeletionReceiptFile(receipt);
@@ -67,6 +68,9 @@ export function AccountDeletionSection({ session }: { session: Session }) {
       if (!accessToken.current) throw new Error('Fresh sign-in proof is missing.');
       const result = await deletePostshowAccount(canonicalEmail, accessToken.current);
       setReceipt(result);
+      // Completion signal so self-serve deletion demand is finally measurable. No email,
+      // token, or receipt id is attached: the taxonomy only needs the count of completions.
+      track('account_deleted');
       downloadReceipt(result);
     } catch (value) {
       if (value instanceof PostshowFunctionError && value.code === 'reauthentication_required') {
