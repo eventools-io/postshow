@@ -46,7 +46,7 @@ jobs:
           exit 1
       - name: Run ButtonMash 0.2.0
         # Exact release commit keeps contributor-triggered CI immutable.
-        uses: cj-vana/buttonmash@3dfe5aa15e824accfd5f72c176ac64b2f63450db # v0.2.0
+        uses: cj-vana/buttonmash@d97dee5635d1a5432af0a26d60fb5b7038f2e4eb # v0.3.1
         with:
           target: http://127.0.0.1:4173/
           version: 0.2.0
