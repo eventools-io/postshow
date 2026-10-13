@@ -46,7 +46,7 @@ jobs:
           exit 1
       - name: Run ButtonMash 0.2.0
         # Exact release commit keeps contributor-triggered CI immutable.
-        uses: cj-vana/buttonmash@3dfe5aa15e824accfd5f72c176ac64b2f63450db # v0.2.0
+        uses: cj-vana/buttonmash@d97dee5635d1a5432af0a26d60fb5b7038f2e4eb # v0.3.1
         with:
           target: http://127.0.0.1:4173/
           version: 0.2.0
@@ -61,7 +61,7 @@ jobs:
         run: kill "$POSTSHOW_PREVIEW_PID" 2>/dev/null || true
       - name: Upload preview log on failure
         if: ${{ failure() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: postshow-buttonmash-preview-log
           path: ${{ runner.temp }}/postshow-preview.log
